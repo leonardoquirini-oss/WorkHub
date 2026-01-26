@@ -1,0 +1,27 @@
+version: '3.8'
+
+# Development docker-compose - uses hot reload
+services:
+  workhub-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: workhub-dev
+    restart: unless-stopped
+    ports:
+      - "5173:5173"
+    volumes:
+      - .:/app
+      - /app/node_modules
+    environment:
+      - VITE_KEYCLOAK_URL=${VITE_KEYCLOAK_URL:-http://192.168.0.12:8080}
+      - VITE_KEYCLOAK_REALM=${VITE_KEYCLOAK_REALM:-gb-realm}
+      - VITE_KEYCLOAK_CLIENT_ID=${VITE_KEYCLOAK_CLIENT_ID:-berlink-client}
+      - VITE_API_URL=${VITE_API_URL:-http://192.168.0.12:8090/api}
+      - VITE_DEFAULT_SITE_ID=${VITE_DEFAULT_SITE_ID:-1}
+    networks:
+      - berlink-network
+
+networks:
+  berlink-network:
+    external: true
