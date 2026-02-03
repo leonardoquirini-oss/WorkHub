@@ -13,7 +13,7 @@ export function useContainerDrag() {
   const dragStartRef = useRef<{ x: number; y: number } | null>(null)
 
   const { setDragging, setDragPreview, selectContainer } = useUIStore()
-  const { yards, selectedYardId, containers, updateContainer, getContainer } = useYardStore()
+  const { yards, selectedYardId, containers, updateContainer, applyGravityAfterMove } = useYardStore()
 
   const yard = yards.find((y) => y.id_yard === selectedYardId)
 
@@ -150,7 +150,18 @@ export function useContainerDrag() {
             position_z: dragPreviewPosition.z,
           })
           console.log('[DEBUG] handleDragEnd - updateContainer SUCCESS')
-          notify.success('Posizione container aggiornata')
+
+          // Apply gravity to containers that may have lost support
+          const gravityResult = await applyGravityAfterMove(
+            draggingContainer.container_number,
+            dragPreviewPosition
+          )
+
+          if (gravityResult.fallenContainers.length > 0) {
+            notify.success(`Posizione aggiornata. ${gravityResult.fallenContainers.length} container riposizionati`)
+          } else {
+            notify.success('Posizione container aggiornata')
+          }
         } catch (err) {
           console.error('[DEBUG] handleDragEnd - updateContainer ERROR:', err)
           notify.error(
@@ -165,7 +176,7 @@ export function useContainerDrag() {
     setDragging(false)
     setDragPreview(null, false)
     setDraggingContainer(null)
-  }, [draggingContainer, setDragging, setDragPreview, updateContainer])
+  }, [draggingContainer, setDragging, setDragPreview, updateContainer, applyGravityAfterMove, selectedYardId])
 
   return {
     draggingContainer,

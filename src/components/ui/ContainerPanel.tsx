@@ -8,6 +8,7 @@ import {
   CONTAINER_STATUS_COLORS,
 } from '../../constants/containerSizes'
 import { calculateTier } from '../../utils/stackingLogic'
+import { wouldCauseCascade } from '../../utils/gravityLogic'
 import {
   X,
   Package,
@@ -22,7 +23,7 @@ import type { Rotation } from '../../types'
 
 export function ContainerPanel() {
   const { selectedContainer, clearSelection } = useContainerSelection()
-  const { updateContainer, removeContainer } = useYardStore()
+  const { containers, updateContainer, removeContainerWithGravity } = useYardStore()
   const { showPanel } = useUIStore()
 
   if (!selectedContainer || !showPanel) {
@@ -49,14 +50,27 @@ export function ContainerPanel() {
   }
 
   const handleDelete = async () => {
-    if (!confirm(`Eliminare il container ${selectedContainer.container_number}?`)) {
+    // Check if removing this container would cause others to fall
+    const cascade = wouldCauseCascade(selectedContainer.container_number, containers)
+
+    let confirmMessage = `Eliminare il container ${selectedContainer.container_number}?`
+    if (cascade.wouldFall) {
+      confirmMessage += `\n\nAttenzione: ${cascade.affectedCount} container cadranno (${cascade.affectedContainers.join(', ')})`
+    }
+
+    if (!confirm(confirmMessage)) {
       return
     }
 
     try {
-      await removeContainer(selectedContainer.container_number)
+      const result = await removeContainerWithGravity(selectedContainer.container_number)
       clearSelection()
-      notify.success('Container rimosso')
+
+      if (result.fallenContainers.length > 0) {
+        notify.success(`Container rimosso. ${result.fallenContainers.length} container riposizionati`)
+      } else {
+        notify.success('Container rimosso')
+      }
     } catch (err) {
       notify.error(err instanceof Error ? err.message : 'Errore rimozione container')
     }

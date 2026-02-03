@@ -19,11 +19,23 @@ export function checkStackingSupport(
 ): SupportResult {
   // If on ground level, always supported
   if (posZ <= 0.01) {
+    console.log('[checkStackingSupport] Container at ground level, always supported')
     return { isSupported: true, supportPercentage: 100, supportingContainers: [] }
   }
 
   const dims = getRotatedDimensions(containerType, rotation)
   const containerArea = dims.length * dims.width
+
+  console.log('[checkStackingSupport] Checking support for container at Z:', posZ)
+  console.log('[checkStackingSupport] Available containers to check:', containers.map(c => {
+    const cDims = getRotatedDimensions(c.container_type, c.rotation)
+    return {
+      num: c.container_number,
+      z: c.position_z,
+      topZ: c.position_z + cDims.height,
+      diff: Math.abs((c.position_z + cDims.height) - posZ)
+    }
+  }))
 
   // Find containers directly below this position
   const containersBelowLevel = containers.filter((c) => {
@@ -31,10 +43,15 @@ export function checkStackingSupport(
     const cDims = getRotatedDimensions(c.container_type, c.rotation)
     const cTopZ = c.position_z + cDims.height
     // Container is directly below if its top is at our bottom
-    return Math.abs(cTopZ - posZ) < 0.1
+    const isBelow = Math.abs(cTopZ - posZ) < 0.1
+    console.log('[checkStackingSupport] Container', c.container_number, 'topZ:', cTopZ, 'diff:', Math.abs(cTopZ - posZ), 'isBelow:', isBelow)
+    return isBelow
   })
 
+  console.log('[checkStackingSupport] Containers below level:', containersBelowLevel.length)
+
   if (containersBelowLevel.length === 0) {
+    console.log('[checkStackingSupport] No containers below - NOT supported')
     return { isSupported: false, supportPercentage: 0, supportingContainers: [] }
   }
 

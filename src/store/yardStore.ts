@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { workHubAPI } from '../api/WorkHubAPI'
 import { API_CONFIG, STORAGE_KEYS } from '../api/config'
+import { calculateGravityCascade, calculateGravityAfterMove } from '../utils/gravityLogic'
 import type { Yard, Container, ContainerCreateRequest, ContainerUpdateRequest, YardStats, Site } from '../types'
 
 interface YardStore {
@@ -29,6 +30,8 @@ interface YardStore {
   addContainer: (data: ContainerCreateRequest) => Promise<Container>
   updateContainer: (containerNumber: string, data: ContainerUpdateRequest) => Promise<Container>
   removeContainer: (containerNumber: string) => Promise<void>
+  removeContainerWithGravity: (containerNumber: string) => Promise<{ fallenContainers: string[] }>
+  applyGravityAfterMove: (containerNumber: string, newPosition: { x: number; y: number; z: number }) => Promise<{ fallenContainers: string[] }>
   getContainer: (containerNumber: string) => Container | undefined
   getYardStats: () => YardStats
   initializeFromStorage: () => Promise<void>
@@ -126,6 +129,64 @@ export const useYardStore = create<YardStore>((set, get) => ({
     set((state) => ({
       containers: state.containers.filter((c) => c.container_number !== containerNumber),
     }))
+  },
+
+  removeContainerWithGravity: async (containerNumber) => {
+    console.log('[yardStore] removeContainerWithGravity called for:', containerNumber)
+    const { containers, updateContainer } = get()
+    console.log('[yardStore] Current containers count:', containers.length)
+
+    // Calculate which containers will fall before removing
+    const cascadeUpdates = calculateGravityCascade(containerNumber, containers)
+    console.log('[yardStore] Cascade updates:', cascadeUpdates)
+
+    // Delete the container from API
+    await workHubAPI.deleteContainer(containerNumber)
+    console.log('[yardStore] Container deleted from API')
+
+    // Remove from local state first
+    set((state) => ({
+      containers: state.containers.filter((c) => c.container_number !== containerNumber),
+    }))
+
+    // Apply gravity updates to fallen containers
+    const fallenContainers: string[] = []
+    for (const update of cascadeUpdates) {
+      try {
+        console.log('[yardStore] Updating fallen container:', update.containerNumber, 'to Z:', update.newZ)
+        await updateContainer(update.containerNumber, { position_z: update.newZ })
+        fallenContainers.push(update.containerNumber)
+        console.log('[yardStore] Update successful')
+      } catch (err) {
+        console.error(`[Gravity] Failed to update container ${update.containerNumber}:`, err)
+      }
+    }
+
+    console.log('[yardStore] Fallen containers:', fallenContainers)
+    return { fallenContainers }
+  },
+
+  applyGravityAfterMove: async (containerNumber, newPosition) => {
+    console.log('[yardStore] applyGravityAfterMove called for:', containerNumber, 'to:', newPosition)
+    const { containers, updateContainer } = get()
+
+    // Calculate which containers will fall after this move
+    const cascadeUpdates = calculateGravityAfterMove(containerNumber, newPosition, containers)
+    console.log('[yardStore] Gravity cascade updates:', cascadeUpdates)
+
+    // Apply gravity updates to fallen containers
+    const fallenContainers: string[] = []
+    for (const update of cascadeUpdates) {
+      try {
+        console.log('[yardStore] Updating fallen container:', update.containerNumber, 'to Z:', update.newZ)
+        await updateContainer(update.containerNumber, { position_z: update.newZ })
+        fallenContainers.push(update.containerNumber)
+      } catch (err) {
+        console.error(`[Gravity] Failed to update container ${update.containerNumber}:`, err)
+      }
+    }
+
+    return { fallenContainers }
   },
 
   getContainer: (containerNumber) => {
