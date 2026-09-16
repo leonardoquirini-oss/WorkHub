@@ -129,7 +129,9 @@ export function useSlotDrag() {
     const press = pressRef.current
     if (press) {
       clearPress()
-      if (press.travel <= ORBIT_SLOP_PX) selectContainer(press.container.container_number)
+      // While placing a container the tap chooses the slot: it must not steal the selection.
+      const placing = useUIStore.getState().pendingEnter !== null
+      if (!placing && press.travel <= ORBIT_SLOP_PX) selectContainer(press.container.container_number)
       return
     }
     void finishDrag()
@@ -153,7 +155,8 @@ export function useSlotDrag() {
       const press = pressRef.current
       if (!press) return
       clearPress()
-      if (press.travel <= ORBIT_SLOP_PX) selectContainer(press.container.container_number)
+      const placing = useUIStore.getState().pendingEnter !== null
+      if (!placing && press.travel <= ORBIT_SLOP_PX) selectContainer(press.container.container_number)
     }
     window.addEventListener('pointerup', cancel)
     window.addEventListener('pointercancel', cancel)

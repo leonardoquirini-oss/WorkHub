@@ -30,9 +30,24 @@ function Scene({ highQuality }: { highQuality: boolean }) {
     [containers, pulseNumber]
   )
 
+  /**
+   * Click on a container. R3F also delivers the click to the ground plane behind it (it was
+   * part of the pointerdown hit list), which would immediately deselect: consume it here.
+   * While placing a pending container the click must reach the ground instead, so the tap
+   * picks the slot under the pointer.
+   */
+  const handleContainerClick = useCallback(
+    (e: ThreeEvent<MouseEvent>) => {
+      if (!pendingEnter) e.stopPropagation()
+    },
+    [pendingEnter]
+  )
+
   const handleGroundClick = useCallback(
     (e: ThreeEvent<MouseEvent>) => {
       if (e.delta > CLICK_SLOP_PX) return // it was an orbit, not a tap
+      // Something closer than the ground was clicked (container, marker): not a click on the yard
+      if (e.intersections[0] && e.intersections[0].eventObject !== e.eventObject) return
       if (pendingEnter) {
         const slot = findSlotAt(blocks, e.point.x, e.point.z, baySpanOf(pendingEnter.container_type))
         if (!slot) {
@@ -93,6 +108,7 @@ function Scene({ highQuality }: { highQuality: boolean }) {
         hiddenNumber={dragging?.container_number ?? null}
         onPointerDown={onContainerPointerDown}
         onPointerUp={onPointerUp}
+        onClick={handleContainerClick}
       />
 
       <ContainerLabels containers={containers} blocks={blocks} selectedNumber={selectedContainerNumber} pulseNumber={pulseNumber} />

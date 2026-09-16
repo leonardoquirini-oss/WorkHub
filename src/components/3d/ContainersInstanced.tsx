@@ -15,6 +15,8 @@ interface ContainersInstancedProps {
   onPointerDown: (container: Container, e: ThreeEvent<PointerEvent>) => void
   /** Ends the gesture when the pointer is released over a container instead of the ground. */
   onPointerUp: () => void
+  /** Click on a container: consumed here so the ground plane behind does not deselect it. */
+  onClick: (e: ThreeEvent<MouseEvent>) => void
 }
 
 const tmpMatrix = new THREE.Matrix4()
@@ -40,10 +42,11 @@ interface TypeInstancesProps {
   hiddenNumber: string | null
   onPointerDown: (container: Container, e: ThreeEvent<PointerEvent>) => void
   onPointerUp: () => void
+  onClick: (e: ThreeEvent<MouseEvent>) => void
 }
 
 /** One InstancedMesh per container type (same box geometry, per-instance transform + colour). */
-function TypeInstances({ type, list, all, blocksById, selectedNumber, hiddenNumber, onPointerDown, onPointerUp }: TypeInstancesProps) {
+function TypeInstances({ type, list, all, blocksById, selectedNumber, hiddenNumber, onPointerDown, onPointerUp, onClick }: TypeInstancesProps) {
   const ref = useRef<THREE.InstancedMesh>(null)
   const invalidate = useThree((s) => s.invalidate)
   const dims = CONTAINER_DIMENSIONS[type]
@@ -86,6 +89,7 @@ function TypeInstances({ type, list, all, blocksById, selectedNumber, hiddenNumb
         onPointerDown(list[e.instanceId], e)
       }}
       onPointerUp={() => onPointerUp()}
+      onClick={onClick}
       onPointerOver={(e) => {
         e.stopPropagation()
         document.body.style.cursor = 'pointer'
@@ -100,7 +104,7 @@ function TypeInstances({ type, list, all, blocksById, selectedNumber, hiddenNumb
   )
 }
 
-export function ContainersInstanced({ containers, blocks, selectedNumber, hiddenNumber, onPointerDown, onPointerUp }: ContainersInstancedProps) {
+export function ContainersInstanced({ containers, blocks, selectedNumber, hiddenNumber, onPointerDown, onPointerUp, onClick }: ContainersInstancedProps) {
   const blocksById = useMemo(() => new Map(blocks.map((b) => [b.id_block, b])), [blocks])
 
   const byType = useMemo(() => {
@@ -128,6 +132,7 @@ export function ContainersInstanced({ containers, blocks, selectedNumber, hidden
           hiddenNumber={hiddenNumber}
           onPointerDown={onPointerDown}
           onPointerUp={onPointerUp}
+          onClick={onClick}
         />
       ))}
     </group>
