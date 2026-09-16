@@ -44,6 +44,14 @@ export default defineConfig(({ mode }) => {
           target: proxyTarget,
           changeOrigin: true,
           secure: false,
+          // Il browser invia `Origin: http://localhost:5173` anche sulle richieste same-origin non-GET;
+          // il backend la confronterebbe con il proprio host e rifiuterebbe la chiamata come CORS
+          // ("Invalid CORS request"). Dietro il proxy la richiesta e' same-origin: togliamo l'header.
+          configure: (proxy) => {
+            proxy.on('proxyReq', (proxyReq) => {
+              proxyReq.removeHeader('origin')
+            })
+          },
         },
       },
     },
