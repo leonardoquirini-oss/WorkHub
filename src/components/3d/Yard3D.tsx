@@ -92,6 +92,7 @@ function Scene({ highQuality }: { highQuality: boolean }) {
         selectedNumber={selectedContainerNumber}
         hiddenNumber={dragging?.container_number ?? null}
         onPointerDown={onContainerPointerDown}
+        onPointerUp={onPointerUp}
       />
 
       <ContainerLabels containers={containers} blocks={blocks} selectedNumber={selectedContainerNumber} pulseNumber={pulseNumber} />

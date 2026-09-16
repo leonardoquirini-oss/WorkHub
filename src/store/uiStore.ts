@@ -8,6 +8,13 @@ interface UIPreferences {
   showAreas: boolean
   showStats: boolean
   viewMode: ViewMode
+  toolbarPos: ToolbarPos | null
+}
+
+/** Position (px, relative to the view area) of the floating toolbar; null = default corner. */
+export interface ToolbarPos {
+  x: number
+  y: number
 }
 
 /** Slot under the pointer while dragging, with the outcome of the client-side validation. */
@@ -47,6 +54,8 @@ interface UIStore {
   isDragging: boolean
   dragTarget: DragTarget | null
 
+  toolbarPos: ToolbarPos | null
+
   cameraPreset: CameraPreset
   flyTo: FlyToRequest | null
   /** Container highlighted after a search ("Trova"). */
@@ -60,6 +69,7 @@ interface UIStore {
   toggleStats: () => void
   togglePanel: () => void
   setViewMode: (mode: ViewMode) => void
+  setToolbarPos: (pos: ToolbarPos | null) => void
   selectContainer: (containerNumber: string | null) => void
   toggleSelect: (containerNumber: string) => void
   setDragging: (isDragging: boolean) => void
@@ -105,8 +115,8 @@ function sameTarget(a: DragTarget | null, b: DragTarget | null): boolean {
 
 export const useUIStore = create<UIStore>((set, get) => {
   const persist = () => {
-    const { showGrid, showAreas, showStats, viewMode } = get()
-    savePreferences({ showGrid, showAreas, showStats, viewMode })
+    const { showGrid, showAreas, showStats, viewMode, toolbarPos } = get()
+    savePreferences({ showGrid, showAreas, showStats, viewMode, toolbarPos })
   }
 
   return {
@@ -115,6 +125,7 @@ export const useUIStore = create<UIStore>((set, get) => {
     showStats: true,
     showPanel: true,
     viewMode: '3d',
+    toolbarPos: null,
     selectedContainerNumber: null,
     isDragging: false,
     dragTarget: null,
@@ -139,6 +150,10 @@ export const useUIStore = create<UIStore>((set, get) => {
     togglePanel: () => set((s) => ({ showPanel: !s.showPanel })),
     setViewMode: (viewMode) => {
       set({ viewMode })
+      persist()
+    },
+    setToolbarPos: (toolbarPos) => {
+      set({ toolbarPos })
       persist()
     },
 
@@ -171,6 +186,7 @@ export const useUIStore = create<UIStore>((set, get) => {
         showAreas: prefs.showAreas ?? true,
         showStats: prefs.showStats ?? true,
         viewMode: prefs.viewMode ?? '3d',
+        toolbarPos: prefs.toolbarPos ?? null,
       })
     },
   }

@@ -27,7 +27,7 @@ function compare(a: Container, b: Container, key: SortKey): number {
 /** Sortable table of all containers of the yard (placed and to-be-allocated). */
 export function ContainerList() {
   const { containers } = useYardStore()
-  const { selectedContainerNumber, selectContainer, setViewMode, setPulse } = useUIStore()
+  const { selectedContainerNumber, selectContainer, setViewMode, setPulse, toolbarPos } = useUIStore()
   const [sortKey, setSortKey] = useState<SortKey>('label')
   const [asc, setAsc] = useState(true)
 
@@ -51,7 +51,12 @@ export function ContainerList() {
   }
 
   return (
-    <div className="w-full h-full overflow-auto bg-slate-900 p-2 sm:p-4">
+    <div
+      className={`w-full h-full overflow-auto bg-slate-900 p-2 sm:p-4 ${
+        // Leave room for the floating toolbar while it sits in its default corner
+        toolbarPos ? '' : 'pt-28 sm:pt-4 sm:pl-44'
+      }`}
+    >
       <table className="w-full text-sm text-left text-slate-300">
         <thead className="text-xs uppercase text-slate-400 bg-slate-800 sticky top-0">
           <tr>

@@ -12,6 +12,8 @@ import type { Container } from '../types'
 export const LONG_PRESS_MS = 300
 /** Pointer movement (px) that cancels a pending long-press. */
 const TAP_SLOP_PX = 10
+/** Movement (px) above which the gesture is a camera orbit, not a tap on the container. */
+const ORBIT_SLOP_PX = 14
 
 const GROUND_PLANE = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0)
 const hitPoint = new THREE.Vector3()
@@ -20,13 +22,19 @@ interface PendingPress {
   container: Container
   x: number
   y: number
-  timer: ReturnType<typeof setTimeout>
+  /** Largest distance (px) travelled since pointerdown. */
+  travel: number
+  timer: ReturnType<typeof setTimeout> | null
 }
 
 /**
  * Slot-based drag & drop: long-press a container to pick it up, drag over a block and
  * release on a valid slot. Validation mirrors the server (`canPlace`); the store performs
  * the optimistic move and the API call.
+ *
+ * A short press that never becomes a drag is a tap: it selects the container (and opens the
+ * details panel). The press is kept until pointerup even when the long-press timer is
+ * cancelled by a small movement, so an imprecise click still selects.
  */
 export function useSlotDrag() {
   const pressRef = useRef<PendingPress | null>(null)
@@ -35,13 +43,12 @@ export function useSlotDrag() {
 
   const canWrite = useAuthStore((s) => s.canWrite)
   const { blocks, containers, moveContainer } = useYardStore()
-  const { setDragging, setDragTarget, toggleSelect, selectContainer } = useUIStore()
+  const { setDragging, setDragTarget, selectContainer } = useUIStore()
 
   const clearPress = useCallback(() => {
-    if (pressRef.current) {
-      clearTimeout(pressRef.current.timer)
-      pressRef.current = null
-    }
+    const press = pressRef.current
+    if (press?.timer) clearTimeout(press.timer)
+    pressRef.current = null
   }, [])
 
   const setDragging_ = useCallback(
@@ -57,28 +64,30 @@ export function useSlotDrag() {
   const onContainerPointerDown = useCallback(
     (container: Container, e: ThreeEvent<PointerEvent>) => {
       e.stopPropagation()
-      if (!canWrite) {
-        toggleSelect(container.container_number)
-        return
-      }
       clearPress()
-      const timer = setTimeout(() => {
-        pressRef.current = null
-        selectContainer(container.container_number)
-        setDragging_(container)
-      }, LONG_PRESS_MS)
-      pressRef.current = { container, x: e.nativeEvent.clientX, y: e.nativeEvent.clientY, timer }
+      const timer = canWrite
+        ? setTimeout(() => {
+            if (pressRef.current) pressRef.current.timer = null
+            selectContainer(container.container_number)
+            setDragging_(container)
+            pressRef.current = null
+          }, LONG_PRESS_MS)
+        : null
+      pressRef.current = { container, x: e.nativeEvent.clientX, y: e.nativeEvent.clientY, travel: 0, timer }
     },
-    [canWrite, clearPress, selectContainer, setDragging_, toggleSelect]
+    [canWrite, clearPress, selectContainer, setDragging_]
   )
 
   const onPointerMove = useCallback(
     (e: ThreeEvent<PointerEvent>) => {
       const press = pressRef.current
       if (press) {
-        const dx = e.nativeEvent.clientX - press.x
-        const dy = e.nativeEvent.clientY - press.y
-        if (Math.hypot(dx, dy) > TAP_SLOP_PX) clearPress()
+        press.travel = Math.max(press.travel, Math.hypot(e.nativeEvent.clientX - press.x, e.nativeEvent.clientY - press.y))
+        // Too much movement: this is an orbit, cancel the pick-up but keep the press for the tap check
+        if (press.travel > TAP_SLOP_PX && press.timer) {
+          clearTimeout(press.timer)
+          press.timer = null
+        }
         return
       }
       const current = draggingRef.current
@@ -96,7 +105,7 @@ export function useSlotDrag() {
       const result = canPlace(current, slot, blocks, containers)
       setDragTarget({ ...slot, tier: result.tier, valid: result.ok, reason: result.reason })
     },
-    [blocks, containers, clearPress, setDragTarget]
+    [blocks, containers, setDragTarget]
   )
 
   const finishDrag = useCallback(async () => {
@@ -112,15 +121,19 @@ export function useSlotDrag() {
     await moveContainer(current.container_number, { id_block: target.id_block, bay: target.bay, row_no: target.row_no })
   }, [moveContainer, setDragging_])
 
+  /**
+   * Ends the gesture. Bound to both the ground plane and the containers, because the pointer
+   * can be released over either; whichever fires first consumes the pending press.
+   */
   const onPointerUp = useCallback(() => {
     const press = pressRef.current
     if (press) {
       clearPress()
-      toggleSelect(press.container.container_number)
+      if (press.travel <= ORBIT_SLOP_PX) selectContainer(press.container.container_number)
       return
     }
     void finishDrag()
-  }, [clearPress, finishDrag, toggleSelect])
+  }, [clearPress, finishDrag, selectContainer])
 
   // Releasing outside the canvas must still end the drag.
   useEffect(() => {
@@ -133,6 +146,22 @@ export function useSlotDrag() {
       window.removeEventListener('pointercancel', end)
     }
   }, [dragging, finishDrag])
+
+  // A press that never reaches pointerup on the canvas (e.g. released outside) must not leak.
+  useEffect(() => {
+    const cancel = () => {
+      const press = pressRef.current
+      if (!press) return
+      clearPress()
+      if (press.travel <= ORBIT_SLOP_PX) selectContainer(press.container.container_number)
+    }
+    window.addEventListener('pointerup', cancel)
+    window.addEventListener('pointercancel', cancel)
+    return () => {
+      window.removeEventListener('pointerup', cancel)
+      window.removeEventListener('pointercancel', cancel)
+    }
+  }, [clearPress, selectContainer])
 
   useEffect(() => () => clearPress(), [clearPress])
 

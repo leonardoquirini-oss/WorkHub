@@ -13,6 +13,8 @@ interface ContainersInstancedProps {
   /** Container being dragged: hidden in place (the ghost is drawn by SlotHighlight). */
   hiddenNumber: string | null
   onPointerDown: (container: Container, e: ThreeEvent<PointerEvent>) => void
+  /** Ends the gesture when the pointer is released over a container instead of the ground. */
+  onPointerUp: () => void
 }
 
 const tmpMatrix = new THREE.Matrix4()
@@ -37,10 +39,11 @@ interface TypeInstancesProps {
   selectedNumber: string | null
   hiddenNumber: string | null
   onPointerDown: (container: Container, e: ThreeEvent<PointerEvent>) => void
+  onPointerUp: () => void
 }
 
 /** One InstancedMesh per container type (same box geometry, per-instance transform + colour). */
-function TypeInstances({ type, list, all, blocksById, selectedNumber, hiddenNumber, onPointerDown }: TypeInstancesProps) {
+function TypeInstances({ type, list, all, blocksById, selectedNumber, hiddenNumber, onPointerDown, onPointerUp }: TypeInstancesProps) {
   const ref = useRef<THREE.InstancedMesh>(null)
   const invalidate = useThree((s) => s.invalidate)
   const dims = CONTAINER_DIMENSIONS[type]
@@ -82,6 +85,7 @@ function TypeInstances({ type, list, all, blocksById, selectedNumber, hiddenNumb
         if (e.instanceId === undefined) return
         onPointerDown(list[e.instanceId], e)
       }}
+      onPointerUp={() => onPointerUp()}
       onPointerOver={(e) => {
         e.stopPropagation()
         document.body.style.cursor = 'pointer'
@@ -96,7 +100,7 @@ function TypeInstances({ type, list, all, blocksById, selectedNumber, hiddenNumb
   )
 }
 
-export function ContainersInstanced({ containers, blocks, selectedNumber, hiddenNumber, onPointerDown }: ContainersInstancedProps) {
+export function ContainersInstanced({ containers, blocks, selectedNumber, hiddenNumber, onPointerDown, onPointerUp }: ContainersInstancedProps) {
   const blocksById = useMemo(() => new Map(blocks.map((b) => [b.id_block, b])), [blocks])
 
   const byType = useMemo(() => {
@@ -123,6 +127,7 @@ export function ContainersInstanced({ containers, blocks, selectedNumber, hidden
           selectedNumber={selectedNumber}
           hiddenNumber={hiddenNumber}
           onPointerDown={onPointerDown}
+          onPointerUp={onPointerUp}
         />
       ))}
     </group>

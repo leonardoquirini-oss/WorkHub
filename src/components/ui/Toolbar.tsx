@@ -1,9 +1,9 @@
-import { useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useUIStore } from '../../store/uiStore'
 import { useYardStore } from '../../store/yardStore'
 import { useAuthStore } from '../../store/authStore'
 import { AddContainerModal } from './AddContainerModal'
-import { Plus, Grid3X3, Layers, BarChart3, Camera, Eye, EyeOff, Box, Map, List } from 'lucide-react'
+import { Plus, Grid3X3, Layers, BarChart3, Camera, Eye, EyeOff, Box, Map, List, GripHorizontal } from 'lucide-react'
 import type { CameraPreset, ViewMode } from '../../types'
 
 const VIEW_MODES: { mode: ViewMode; label: string; icon: React.ReactNode }[] = [
@@ -19,16 +19,97 @@ const CAMERA_PRESETS: { preset: CameraPreset; label: string }[] = [
   { preset: 'side', label: 'Lato' },
 ]
 
+const clamp = (v: number, min: number, max: number) => Math.min(Math.max(v, min), max)
+
+/**
+ * Floating toolbar (add container, view mode, layers, camera). It can be dragged by its
+ * handle so it never covers the content underneath — the position is persisted; a double
+ * click (or double tap) on the handle puts it back in the default corner.
+ */
 export function Toolbar() {
   const [showAddModal, setShowAddModal] = useState(false)
   const { selectedYardId, blocks } = useYardStore()
   const canWrite = useAuthStore((s) => s.canWrite)
-  const { showGrid, showAreas, showStats, toggleGrid, toggleAreas, toggleStats, cameraPreset, setCameraPreset, viewMode, setViewMode, pendingEnter } =
-    useUIStore()
+  const {
+    showGrid, showAreas, showStats, toggleGrid, toggleAreas, toggleStats,
+    cameraPreset, setCameraPreset, viewMode, setViewMode, pendingEnter,
+    toolbarPos, setToolbarPos,
+  } = useUIStore()
+
+  const rootRef = useRef<HTMLDivElement>(null)
+  const grabRef = useRef<{ dx: number; dy: number } | null>(null)
+
+  /** Area the toolbar can be moved in (the view container it is positioned against). */
+  const area = useCallback(() => {
+    const el = rootRef.current
+    const parent = el?.offsetParent as HTMLElement | null
+    if (!el || !parent) return null
+    return { rect: parent.getBoundingClientRect(), w: el.offsetWidth, h: el.offsetHeight }
+  }, [])
+
+  const onHandleDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    const el = rootRef.current
+    if (!el || e.button !== 0) return
+    const box = el.getBoundingClientRect()
+    grabRef.current = { dx: e.clientX - box.left, dy: e.clientY - box.top }
+    e.currentTarget.setPointerCapture(e.pointerId)
+    e.preventDefault()
+  }, [])
+
+  const onHandleMove = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      const grab = grabRef.current
+      const a = area()
+      if (!grab || !a) return
+      setToolbarPos({
+        x: clamp(e.clientX - a.rect.left - grab.dx, 0, Math.max(a.rect.width - a.w, 0)),
+        y: clamp(e.clientY - a.rect.top - grab.dy, 0, Math.max(a.rect.height - a.h, 0)),
+      })
+    },
+    [area, setToolbarPos]
+  )
+
+  const onHandleUp = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    grabRef.current = null
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId)
+  }, [])
+
+  // Keep the toolbar inside the view when it is resized (rotation, window resize).
+  useEffect(() => {
+    if (!toolbarPos) return
+    const onResize = () => {
+      const a = area()
+      if (!a) return
+      const x = clamp(toolbarPos.x, 0, Math.max(a.rect.width - a.w, 0))
+      const y = clamp(toolbarPos.y, 0, Math.max(a.rect.height - a.h, 0))
+      if (x !== toolbarPos.x || y !== toolbarPos.y) setToolbarPos({ x, y })
+    }
+    onResize()
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [toolbarPos, area, setToolbarPos])
 
   return (
     <>
-      <div className="absolute top-2 left-2 sm:top-4 sm:left-4 flex flex-col gap-2 z-20 max-h-[calc(100%-1rem)] overflow-y-auto">
+      <div
+        ref={rootRef}
+        style={toolbarPos ? { left: toolbarPos.x, top: toolbarPos.y } : undefined}
+        className={`absolute z-30 flex flex-col gap-2 max-h-[calc(100%-1rem)] overflow-y-auto ${
+          toolbarPos ? '' : 'top-2 left-2 sm:top-4 sm:left-4'
+        }`}
+      >
+        <div
+          onPointerDown={onHandleDown}
+          onPointerMove={onHandleMove}
+          onPointerUp={onHandleUp}
+          onPointerCancel={onHandleUp}
+          onDoubleClick={() => setToolbarPos(null)}
+          title="Trascina per spostare il menu · doppio click per rimetterlo nell'angolo"
+          className="flex items-center justify-center gap-1 h-6 rounded-lg bg-slate-800/95 backdrop-blur-sm border border-slate-700 shadow-lg text-slate-400 hover:text-white cursor-grab active:cursor-grabbing touch-none select-none"
+        >
+          <GripHorizontal className="w-4 h-4" />
+        </div>
+
         {canWrite && (
           <button
             onClick={() => setShowAddModal(true)}
