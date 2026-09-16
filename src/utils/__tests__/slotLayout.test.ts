@@ -59,6 +59,7 @@ describe('footprint and geometry', () => {
     expect(baySpanOf('40')).toBe(2)
     expect(baySpanOf('40HC')).toBe(2)
     expect(baySpanOf('45HC')).toBe(2)
+    expect(baySpanOf('30')).toBe(2)
     expect(footprintLength(block, 2)).toBeCloseTo(12.5)
   })
 

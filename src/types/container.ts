@@ -1,4 +1,4 @@
-export type ContainerType = '20' | '40' | '40HC' | '45HC'
+export type ContainerType = '20' | '30' | '40' | '40HC' | '45HC'
 
 export type ContainerStatus = 'active' | 'damaged' | 'maintenance'
 

@@ -6,8 +6,8 @@
  * - Server `position_x` = world X, `position_y` = world Z (ground depth), `position_z` = height.
  * - Block local axes: `u` runs along the bays, `v` along the rows. With `orientation = 0`
  *   `u` maps to world X and `v` to world Z; with `orientation = 90` they are swapped.
- * - A bay is a 20' unit. 40'/40HC/45HC take two consecutive bays starting on an ODD bay
- *   and are registered on that odd bay.
+ * - A bay is a 20' unit. Every type longer than a 20' (30', 40', 40HC, 45HC) takes two
+ *   consecutive bays starting on an ODD bay and is registered on that odd bay.
  * - Stacks are homogeneous: every tier of a column has the same `bay` and `bay_span`.
  */
 import type { Block, Container, ContainerType, PlacedContainer, SlotRef, BaySpan } from '../types'

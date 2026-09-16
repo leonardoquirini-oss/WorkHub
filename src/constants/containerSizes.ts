@@ -7,6 +7,11 @@ export const CONTAINER_DIMENSIONS: Record<ContainerType, ContainerDimensions> = 
     width: 2.4,
     height: 2.6,
   },
+  '30': {
+    length: 9.1,
+    width: 2.4,
+    height: 2.6,
+  },
   '40': {
     length: 12.2,
     width: 2.4,
@@ -26,6 +31,7 @@ export const CONTAINER_DIMENSIONS: Record<ContainerType, ContainerDimensions> = 
 
 export const CONTAINER_TYPE_LABELS: Record<ContainerType, string> = {
   '20': "20' Standard",
+  '30': "30' Standard",
   '40': "40' Standard",
   '40HC': "40' High Cube",
   '45HC': "45' High Cube",

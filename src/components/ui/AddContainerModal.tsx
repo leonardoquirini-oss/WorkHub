@@ -27,7 +27,7 @@ export function AddContainerModal({ onClose }: AddContainerModalProps) {
   const [fromRegistry, setFromRegistry] = useState(false)
 
   const [containerNumber, setContainerNumber] = useState('')
-  const [containerType, setContainerType] = useState<ContainerType>('40')
+  const [containerType, setContainerType] = useState<ContainerType>('30')
   const [color, setColor] = useState(DEFAULT_CONTAINER_COLORS[0])
   const [content, setContent] = useState('')
   const [notes, setNotes] = useState('')
