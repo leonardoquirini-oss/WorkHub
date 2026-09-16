@@ -1,4 +1,5 @@
 import { Text } from '@react-three/drei'
+import * as THREE from 'three'
 import type { YardArea } from '../../types'
 
 interface YardAreas3DProps {
@@ -34,12 +35,8 @@ export function YardAreas3D({ areas, visible = true }: YardAreas3DProps) {
             </mesh>
 
             {/* Area border */}
-            <lineSegments position={[centerX, 0.03, centerZ]}>
-              <edgesGeometry
-                args={[new THREE.PlaneGeometry(width, length)]}
-                // @ts-ignore - needed for proper rotation
-                rotation={[-Math.PI / 2, 0, 0]}
-              />
+            <lineSegments position={[centerX, 0.03, centerZ]} rotation={[-Math.PI / 2, 0, 0]}>
+              <edgesGeometry args={[new THREE.PlaneGeometry(width, length)]} />
               <lineBasicMaterial color={area.color} linewidth={2} />
             </lineSegments>
 
@@ -63,5 +60,3 @@ export function YardAreas3D({ areas, visible = true }: YardAreas3DProps) {
   )
 }
 
-// Need to import THREE for PlaneGeometry
-import * as THREE from 'three'

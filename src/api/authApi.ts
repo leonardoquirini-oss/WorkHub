@@ -1,7 +1,8 @@
 import { API_CONFIG, STORAGE_KEYS } from './config'
 import type { KeycloakTokenResponse, TokenData, User } from '../types'
 
-function parseJwt(token: string): Record<string, unknown> {
+/** Decodes the payload of a JWT without verifying it. Returns `{}` on malformed input. */
+export function parseJwt(token: string): Record<string, unknown> {
   try {
     const base64Url = token.split('.')[1]
     const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/')
@@ -17,26 +18,54 @@ function parseJwt(token: string): Record<string, unknown> {
   }
 }
 
-function extractUserFromToken(accessToken: string): User {
+/**
+ * Builds the app user from the access token.
+ * BERLink assigns roles as Keycloak *client* roles (`resource_access.<clientId>.roles`);
+ * realm roles are merged in for completeness.
+ */
+export function extractUserFromToken(accessToken: string, clientId = API_CONFIG.clientId): User {
   const payload = parseJwt(accessToken)
-  const realmAccess = (payload.realm_access as { roles?: string[] }) || {}
+  const realmAccess = (payload.realm_access as { roles?: string[] } | undefined) ?? {}
+  const resourceAccess =
+    (payload.resource_access as Record<string, { roles?: string[] }> | undefined) ?? {}
+  const clientRoles = resourceAccess[clientId]?.roles ?? []
+  const roles = Array.from(new Set([...clientRoles, ...(realmAccess.roles ?? [])]))
 
   return {
     username: (payload.preferred_username as string) || '',
     name: (payload.name as string) || (payload.preferred_username as string) || '',
     email: (payload.email as string) || undefined,
-    roles: realmAccess.roles || [],
+    roles,
   }
 }
 
-export async function login(username: string, password: string): Promise<{ tokenData: TokenData; user: User }> {
-  const url = `${API_CONFIG.keycloakUrl}/realms/${API_CONFIG.realm}/protocol/openid-connect/token`
+function tokenEndpoint(): string {
+  return `${API_CONFIG.keycloakUrl}/realms/${API_CONFIG.realm}/protocol/openid-connect/token`
+}
 
-  const response = await fetch(url, {
+/** Converts a Keycloak token response into TokenData + User and persists it. */
+function persistSession(data: KeycloakTokenResponse): { tokenData: TokenData; user: User } {
+  const tokenExpiry = Date.now() + data.expires_in * 1000
+  const tokenData: TokenData = {
+    accessToken: data.access_token,
+    refreshToken: data.refresh_token,
+    expiresIn: data.expires_in,
+    tokenExpiry,
+  }
+  const user = extractUserFromToken(data.access_token)
+
+  localStorage.setItem(STORAGE_KEYS.accessToken, tokenData.accessToken)
+  localStorage.setItem(STORAGE_KEYS.refreshToken, tokenData.refreshToken)
+  localStorage.setItem(STORAGE_KEYS.tokenExpiry, tokenExpiry.toString())
+  localStorage.setItem(STORAGE_KEYS.user, JSON.stringify(user))
+
+  return { tokenData, user }
+}
+
+export async function login(username: string, password: string): Promise<{ tokenData: TokenData; user: User }> {
+  const response = await fetch(tokenEndpoint(), {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/x-www-form-urlencoded',
-    },
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({
       grant_type: 'password',
       client_id: API_CONFIG.clientId,
@@ -52,35 +81,13 @@ export async function login(username: string, password: string): Promise<{ token
     throw new Error('Errore durante il login')
   }
 
-  const data: KeycloakTokenResponse = await response.json()
-  const tokenExpiry = Date.now() + data.expires_in * 1000
-
-  const tokenData: TokenData = {
-    accessToken: data.access_token,
-    refreshToken: data.refresh_token,
-    expiresIn: data.expires_in,
-    tokenExpiry,
-  }
-
-  const user = extractUserFromToken(data.access_token)
-
-  // Persist to localStorage
-  localStorage.setItem(STORAGE_KEYS.accessToken, tokenData.accessToken)
-  localStorage.setItem(STORAGE_KEYS.refreshToken, tokenData.refreshToken)
-  localStorage.setItem(STORAGE_KEYS.tokenExpiry, tokenExpiry.toString())
-  localStorage.setItem(STORAGE_KEYS.user, JSON.stringify(user))
-
-  return { tokenData, user }
+  return persistSession((await response.json()) as KeycloakTokenResponse)
 }
 
 export async function refreshAccessToken(refreshToken: string): Promise<{ tokenData: TokenData; user: User }> {
-  const url = `${API_CONFIG.keycloakUrl}/realms/${API_CONFIG.realm}/protocol/openid-connect/token`
-
-  const response = await fetch(url, {
+  const response = await fetch(tokenEndpoint(), {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/x-www-form-urlencoded',
-    },
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({
       grant_type: 'refresh_token',
       client_id: API_CONFIG.clientId,
@@ -93,25 +100,7 @@ export async function refreshAccessToken(refreshToken: string): Promise<{ tokenD
     throw new Error('Sessione scaduta, effettuare nuovo login')
   }
 
-  const data: KeycloakTokenResponse = await response.json()
-  const tokenExpiry = Date.now() + data.expires_in * 1000
-
-  const tokenData: TokenData = {
-    accessToken: data.access_token,
-    refreshToken: data.refresh_token,
-    expiresIn: data.expires_in,
-    tokenExpiry,
-  }
-
-  const user = extractUserFromToken(data.access_token)
-
-  // Update localStorage
-  localStorage.setItem(STORAGE_KEYS.accessToken, tokenData.accessToken)
-  localStorage.setItem(STORAGE_KEYS.refreshToken, tokenData.refreshToken)
-  localStorage.setItem(STORAGE_KEYS.tokenExpiry, tokenExpiry.toString())
-  localStorage.setItem(STORAGE_KEYS.user, JSON.stringify(user))
-
-  return { tokenData, user }
+  return persistSession((await response.json()) as KeycloakTokenResponse)
 }
 
 export async function logout(refreshToken: string): Promise<void> {
@@ -120,16 +109,14 @@ export async function logout(refreshToken: string): Promise<void> {
   try {
     await fetch(url, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
         client_id: API_CONFIG.clientId,
         refresh_token: refreshToken,
       }),
     })
   } catch {
-    // Ignore logout errors
+    // Keycloak unreachable: local session is cleared anyway
   }
 
   clearStoredAuth()

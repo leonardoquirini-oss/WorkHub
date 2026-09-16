@@ -14,11 +14,13 @@ services:
       - .:/app
       - /app/node_modules
     environment:
-      - VITE_KEYCLOAK_URL=${VITE_KEYCLOAK_URL:-http://192.168.0.12:8080}
+      - VITE_KEYCLOAK_URL=${VITE_KEYCLOAK_URL:-http://localhost:8080}
       - VITE_KEYCLOAK_REALM=${VITE_KEYCLOAK_REALM:-gb-realm}
       - VITE_KEYCLOAK_CLIENT_ID=${VITE_KEYCLOAK_CLIENT_ID:-berlink-client}
-      - VITE_API_URL=${VITE_API_URL:-http://192.168.0.12:8090/api}
+      - VITE_API_URL=${VITE_API_URL:-/api}
       - VITE_DEFAULT_SITE_ID=${VITE_DEFAULT_SITE_ID:-1}
+      # Vite dev proxy target for /api (BERLink backend on the Docker network)
+      - VITE_DEV_PROXY_TARGET=${VITE_DEV_PROXY_TARGET:-http://backend:8080}
     networks:
       - berlink-network
 

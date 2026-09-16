@@ -6,7 +6,7 @@
   font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
   line-height: 1.5;
   font-weight: 400;
-  color-scheme: light dark;
+  color-scheme: dark;
   color: rgba(255, 255, 255, 0.87);
   background-color: #1a1a2e;
   font-synthesis: none;
@@ -19,12 +19,16 @@ body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
+  min-height: 100dvh;
   overflow: hidden;
+  overscroll-behavior: none;
 }
 
+/* 100dvh avoids the mobile browser-chrome gap of 100vh */
 #root {
   width: 100vw;
   height: 100vh;
+  height: 100dvh;
 }
 
 /* Custom scrollbar */
@@ -48,24 +52,22 @@ body {
 
 /* Touch device optimizations */
 @media (hover: none) and (pointer: coarse) {
-  button, .clickable {
-    min-height: 44px;
-    min-width: 44px;
+  button {
+    min-height: 40px;
   }
 }
 
-/* Loading animation */
-@keyframes spin {
+@keyframes slide-in {
+  from {
+    transform: translateY(8px);
+    opacity: 0;
+  }
   to {
-    transform: rotate(360deg);
+    transform: none;
+    opacity: 1;
   }
 }
 
-.animate-spin {
-  animation: spin 1s linear infinite;
-}
-
-/* Panel transitions */
-.panel-transition {
-  transition: transform 0.3s ease-in-out, opacity 0.3s ease-in-out;
+.animate-slide-in {
+  animation: slide-in 0.2s ease-out;
 }

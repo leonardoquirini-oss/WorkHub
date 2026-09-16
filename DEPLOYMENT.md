@@ -4,161 +4,144 @@
 
 - Docker 20.10+
 - Docker Compose v2+
-- Network Docker `berlink-network` esistente
+- Network Docker `berlink-network` esistente (stesso network del backend BERLink)
 
-## Build e Run Locale
+## Sviluppo locale (senza Docker)
+
+```bash
+cp .env.example .env      # adattare VITE_KEYCLOAK_URL e VITE_DEV_PROXY_TARGET
+npm install
+npm run dev               # http://localhost:5173, raggiungibile anche dai tablet in LAN
+npm run lint
+npm test
+npm run build             # tsc + vite build → dist/
+```
+
+`vite` inoltra `/api` al backend indicato da `VITE_DEV_PROXY_TARGET` (default `http://localhost:8090`).
+
+## Build e Run con Docker
 
 ### Produzione
 
 ```bash
-# Build dell'immagine
-docker-compose build
-
-# Avvio del container
-docker-compose up -d
-
-# Verifica logs
-docker-compose logs -f workhub
+docker compose build
+docker compose up -d
+docker compose logs -f workhub
 ```
 
-### Sviluppo (con hot reload)
+### Sviluppo (hot reload)
 
 ```bash
-# Avvio in modalità sviluppo
-docker-compose -f docker-compose.dev.yml up -d
+docker compose -f docker-compose.dev.yml up -d
 ```
 
-## Variabili d'Ambiente
+## Configurazione
 
-### Build-time (configurabili in docker-compose.yml)
+La configurazione ha tre livelli, dal piu' prioritario al meno:
+
+1. **Runtime** — `docker-entrypoint.sh` scrive `/config.js` (`window.__WORKHUB_CONFIG__`) ad ogni avvio del container leggendo le variabili d'ambiente sotto. Permette di cambiare Keycloak/API **senza rebuild** dell'immagine.
+2. **Build-time** — le stesse variabili passate come build args (`docker-compose.yml` → `build.args`) vengono compilate nel bundle come fallback.
+3. **Default** — in `src/api/config.ts` (`http://localhost:8080`, `gb-realm`, `berlink-client`, `/api`, sito `1`).
+
+Una variabile vuota a runtime significa "usa il valore di build".
 
 | Variabile | Default | Descrizione |
 |-----------|---------|-------------|
-| `VITE_KEYCLOAK_URL` | `http://192.168.0.12:8080` | URL Keycloak |
+| `VITE_KEYCLOAK_URL` | `http://localhost:8080` | URL Keycloak **raggiungibile dal browser del tablet** (login diretto, non passa dal proxy) |
 | `VITE_KEYCLOAK_REALM` | `gb-realm` | Realm Keycloak |
-| `VITE_KEYCLOAK_CLIENT_ID` | `berlink-client` | Client ID |
-| `VITE_API_URL` | `/api` | Base URL API (usa proxy nginx) |
-| `VITE_DEFAULT_SITE_ID` | `1` | ID sito default |
+| `VITE_KEYCLOAK_CLIENT_ID` | `berlink-client` | Client pubblico con Direct Access Grants abilitato |
+| `VITE_API_URL` | `/api` | Base URL API; lasciare `/api` per usare il proxy nginx (same-origin, niente CORS) |
+| `VITE_DEFAULT_SITE_ID` | `1` | Sito selezionato al primo accesso |
 
-### Runtime (configurabili senza rebuild)
+Solo runtime (nginx):
 
 | Variabile | Default | Descrizione |
 |-----------|---------|-------------|
-| `BACKEND_URL` | `http://backend:8080` | URL backend per proxy nginx |
-| `WORKHUB_PORT` | `5173` | Porta esposta |
-| `RUNTIME_CONFIG` | `false` | Genera config.js runtime |
+| `BACKEND_URL` | `http://backend:8080` | Upstream del proxy `/api` (nome del servizio backend sul network Docker) |
+| `WORKHUB_PORT` | `5173` | Porta esposta sull'host |
+
+### Keycloak
+
+Nel client `berlink-client` aggiungere l'origin di WorkHub (es. `http://<host>:5173`) in **Web Origins**: il login avviene con `grant_type=password` direttamente dal browser.
 
 ## Deploy su Portainer
 
 ### Metodo 1: Stack da docker-compose
 
-1. In Portainer, vai a **Stacks** > **Add stack**
-2. Seleziona **Upload** e carica `docker-compose.yml`
-3. Configura le variabili d'ambiente nella sezione **Environment variables**:
+1. **Stacks** > **Add stack** > **Upload** `docker-compose.yml`
+2. **Environment variables**:
    ```
-   VITE_KEYCLOAK_URL=http://your-keycloak:8080
-   BACKEND_URL=http://your-backend:8080
+   VITE_KEYCLOAK_URL=http://keycloak.azienda.local:8080
+   BACKEND_URL=http://backend:8080
    WORKHUB_PORT=5173
    ```
-4. Clicca **Deploy the stack**
+3. **Deploy the stack**
 
 ### Metodo 2: Build locale + push registry
 
 ```bash
-# Build con tag per registry
-docker build -t your-registry.com/workhub:1.0.0 \
-  --build-arg VITE_KEYCLOAK_URL=http://keycloak.prod:8080 \
-  --build-arg VITE_API_URL=/api \
-  .
-
-# Push al registry
-docker push your-registry.com/workhub:1.0.0
+docker build -t your-registry.com/workhub:2.0.0 .
+docker push your-registry.com/workhub:2.0.0
 ```
 
-Poi in Portainer:
-1. **Containers** > **Add container**
-2. Image: `your-registry.com/workhub:1.0.0`
-3. Port mapping: `5173:80`
-4. Network: `berlink-network`
+Poi in Portainer: **Containers** > **Add container**, image `your-registry.com/workhub:2.0.0`, port `5173:80`, network `berlink-network`, env `VITE_KEYCLOAK_URL` e `BACKEND_URL`.
 
 ### Metodo 3: Git repository
 
-1. Configura webhook Git in Portainer
-2. Crea stack con repository URL
-3. Ad ogni push, Portainer rebuilda automaticamente
+Stack da repository con webhook: ad ogni push Portainer rebuilda.
 
-## Configurazione Network
-
-Assicurarsi che il network `berlink-network` esista:
+## Network
 
 ```bash
 docker network create berlink-network
 ```
 
-Oppure in Portainer: **Networks** > **Add network** > Name: `berlink-network`
-
-## Health Check
-
-L'applicazione espone un endpoint di health check:
+## Health check
 
 ```bash
-curl http://localhost:5173/health
-# Output: OK
+curl http://localhost:5173/health      # OK
+curl http://localhost:5173/config.js   # window.__WORKHUB_CONFIG__ = {...}
 ```
 
-Portainer monitorerà automaticamente lo stato del container.
+## nginx
 
-## Struttura File Docker
+`nginx.conf` gestisce:
+- `/api/` → proxy verso `BACKEND_URL` (timeout 30 s)
+- `/api/workhub/yards/{id}/stream` → proxy **senza buffering**, timeout 1 h (Server-Sent Events del piazzale)
+- `/config.js` e `/index.html` mai in cache; asset con hash in cache 1 anno
+- `/health` → `200 OK`
+
+## Struttura file Docker
 
 ```
 WorkHub/
-├── Dockerfile           # Multi-stage production build
-├── Dockerfile.dev       # Development con hot reload
-├── docker-compose.yml   # Production compose
-├── docker-compose.dev.yml # Development compose
-├── nginx.conf           # Nginx configuration
-├── docker-entrypoint.sh # Entrypoint script
-└── .dockerignore        # Files esclusi dal build
+├── Dockerfile             # Multi-stage (node:22-alpine → nginx:alpine)
+├── Dockerfile.dev         # Dev con hot reload
+├── docker-compose.yml     # Produzione
+├── docker-compose.dev.yml # Sviluppo
+├── nginx.conf             # Proxy /api, SSE, SPA fallback
+├── docker-entrypoint.sh   # envsubst BACKEND_URL + generazione /config.js
+└── .dockerignore
 ```
 
 ## Troubleshooting
 
-### Container non si avvia
+**Container non si avvia**: `docker logs workhub`; `docker exec workhub cat /etc/nginx/nginx.conf`.
 
-```bash
-# Controlla i logs
-docker logs workhub
+**502 Bad Gateway**: backend non raggiungibile. Verificare `docker ps | grep backend`, `docker network inspect berlink-network`, `BACKEND_URL`.
 
-# Verifica la configurazione nginx
-docker exec workhub cat /etc/nginx/nginx.conf
-```
+**Login fallisce / CORS su Keycloak**: `VITE_KEYCLOAK_URL` deve essere raggiungibile dal tablet e l'origin di WorkHub deve essere tra i Web Origins del client Keycloak. Controllare `curl http://localhost:5173/config.js`.
 
-### Errore 502 Bad Gateway
+**Config non aggiornata dopo cambio env**: `docker compose up -d --force-recreate` (il file `/config.js` viene rigenerato all'avvio; il browser non lo mette in cache).
 
-Il backend non è raggiungibile. Verifica:
-1. Backend in esecuzione: `docker ps | grep backend`
-2. Network corretto: `docker network inspect berlink-network`
-3. `BACKEND_URL` configurato correttamente
-
-### Errore CORS
-
-Le API devono permettere richieste dal dominio WorkHub. Il proxy nginx dovrebbe gestire il CORS ma verificare la configurazione backend se persistono problemi.
-
-### Cache del browser
-
-Dopo un redeploy, svuotare la cache del browser o fare hard refresh (Ctrl+Shift+R).
+**Eventi realtime non arrivano**: verificare che la richiesta a `/api/workhub/yards/{id}/stream` resti aperta (`docker logs workhub`, nessun timeout) e che il backend BERLink esponga lo stream.
 
 ## Aggiornamento
 
 ```bash
-# Pull nuova versione
 git pull
-
-# Rebuild e restart
-docker-compose build --no-cache
-docker-compose up -d
+docker compose build --no-cache
+docker compose up -d
 ```
 
-In Portainer:
-1. Vai allo stack WorkHub
-2. Clicca **Pull and redeploy**
+In Portainer: stack WorkHub > **Pull and redeploy**.

@@ -1,7 +1,8 @@
-import { useRef, useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { useThree } from '@react-three/fiber'
 import { OrbitControls } from '@react-three/drei'
 import type { OrbitControls as OrbitControlsType } from 'three-stdlib'
+import * as THREE from 'three'
 import { useUIStore } from '../../store/uiStore'
 import { CAMERA_PRESETS } from '../../constants/yardConfig'
 
@@ -10,66 +11,63 @@ interface ControlsProps {
   yardLength: number
 }
 
+type Vec3 = { x: number; y: number; z: number }
+
+/** Eases camera position and orbit target to the destination (500 ms, ease-out cubic). */
+function animateCamera(camera: THREE.Camera, controls: OrbitControlsType, endPos: Vec3, endTarget: Vec3) {
+  const startPos = camera.position.clone()
+  const startTarget = controls.target.clone()
+  const duration = 500
+  const startTime = performance.now()
+
+  const step = () => {
+    const progress = Math.min((performance.now() - startTime) / duration, 1)
+    const eased = 1 - Math.pow(1 - progress, 3)
+    camera.position.set(
+      startPos.x + (endPos.x - startPos.x) * eased,
+      startPos.y + (endPos.y - startPos.y) * eased,
+      startPos.z + (endPos.z - startPos.z) * eased
+    )
+    controls.target.set(
+      startTarget.x + (endTarget.x - startTarget.x) * eased,
+      startTarget.y + (endTarget.y - startTarget.y) * eased,
+      startTarget.z + (endTarget.z - startTarget.z) * eased
+    )
+    controls.update() // dispatches "change" → invalidate() in demand mode
+    if (progress < 1) requestAnimationFrame(step)
+  }
+  step()
+}
+
 export function Controls({ yardWidth, yardLength }: ControlsProps) {
   const controlsRef = useRef<OrbitControlsType>(null)
   const { camera } = useThree()
-  const { cameraPreset, isDragging } = useUIStore()
+  const { cameraPreset, isDragging, flyTo } = useUIStore()
 
-  // Apply camera preset
+  // Camera presets scaled to the yard size
   useEffect(() => {
     if (!controlsRef.current) return
-
     const preset = CAMERA_PRESETS[cameraPreset]
-
-    // Adjust preset based on yard size
     const scaleX = yardWidth / 100
     const scaleZ = yardLength / 50
-    const scale = Math.max(scaleX, scaleZ)
-
-    const position = preset.position.map((v, i) => {
-      if (i === 0) return v * scaleX // X
-      if (i === 2) return v * scaleZ // Z
-      return v * scale // Y
-    }) as [number, number, number]
-
-    const target = [
-      (preset.target[0] / 100) * yardWidth,
-      preset.target[1],
-      (preset.target[2] / 50) * yardLength,
-    ] as [number, number, number]
-
-    // Animate to new position
-    const startPos = camera.position.clone()
-    const startTarget = controlsRef.current.target.clone()
-    const endPos = { x: position[0], y: position[1], z: position[2] }
-    const endTarget = { x: target[0], y: target[1], z: target[2] }
-
-    let progress = 0
-    const duration = 500 // ms
-    const startTime = Date.now()
-
-    const animate = () => {
-      progress = Math.min((Date.now() - startTime) / duration, 1)
-      const eased = 1 - Math.pow(1 - progress, 3) // Ease out cubic
-
-      camera.position.x = startPos.x + (endPos.x - startPos.x) * eased
-      camera.position.y = startPos.y + (endPos.y - startPos.y) * eased
-      camera.position.z = startPos.z + (endPos.z - startPos.z) * eased
-
-      if (controlsRef.current) {
-        controlsRef.current.target.x = startTarget.x + (endTarget.x - startTarget.x) * eased
-        controlsRef.current.target.y = startTarget.y + (endTarget.y - startTarget.y) * eased
-        controlsRef.current.target.z = startTarget.z + (endTarget.z - startTarget.z) * eased
-        controlsRef.current.update()
-      }
-
-      if (progress < 1) {
-        requestAnimationFrame(animate)
-      }
-    }
-
-    animate()
+    const scaleY = Math.max(scaleX, scaleZ)
+    animateCamera(
+      camera,
+      controlsRef.current,
+      { x: preset.position[0] * scaleX, y: preset.position[1] * scaleY, z: preset.position[2] * scaleZ },
+      { x: (preset.target[0] / 100) * yardWidth, y: preset.target[1], z: (preset.target[2] / 50) * yardLength }
+    )
   }, [cameraPreset, camera, yardWidth, yardLength])
+
+  // "Trova container": keep the current viewing direction, move closer to the target
+  useEffect(() => {
+    if (!flyTo || !controlsRef.current) return
+    const controls = controlsRef.current
+    const dir = camera.position.clone().sub(controls.target)
+    if (dir.lengthSq() < 1) dir.set(20, 20, 20)
+    dir.setLength(Math.max(25, Math.min(dir.length(), 45)))
+    animateCamera(camera, controls, { x: flyTo.x + dir.x, y: flyTo.y + dir.y, z: flyTo.z + dir.z }, flyTo)
+  }, [flyTo, camera])
 
   return (
     <OrbitControls
@@ -77,15 +75,14 @@ export function Controls({ yardWidth, yardLength }: ControlsProps) {
       makeDefault
       enableDamping
       dampingFactor={0.1}
-      minDistance={10}
-      maxDistance={200}
-      maxPolarAngle={Math.PI / 2 - 0.05} // Prevent going below ground
+      minDistance={8}
+      maxDistance={250}
+      maxPolarAngle={Math.PI / 2 - 0.05}
       minPolarAngle={0.1}
       enabled={!isDragging}
-      // Touch settings for tablet
       touches={{
-        ONE: 0, // ROTATE
-        TWO: 2, // DOLLY_PAN
+        ONE: THREE.TOUCH.ROTATE, // one finger on empty ground orbits; on a container it selects / long-press picks up
+        TWO: THREE.TOUCH.DOLLY_PAN,
       }}
     />
   )

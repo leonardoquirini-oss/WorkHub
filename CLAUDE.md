@@ -1,190 +1,65 @@
-# BERLink Platform - Claude Code Reference
+# WorkHub - Claude Code Reference
 
-## Stack Tecnologico
+App tablet per il **piazzalista**: gestione in tempo reale dei container sui piazzali (slot bay/row/tier), condivisa tra piu' dispositivi. Client separato di BERLink: parla con il backend BERLink (`/api/workhub/*`) e con Keycloak.
 
-| Layer | Tecnologia | Versione |
-|-------|------------|----------|
-| Backend | Java + Spring Boot | 17 / 3.1.5 |
-| ORM | ActiveJDBC | 3.0 |
-| Frontend | SvelteKit + Tailwind | 2.0 / 3.3.6 |
-| Database | PostgreSQL | 18 |
-| Auth | Keycloak | 20.0.5 |
-| Cache | Valkey | 9.0 |
-| Build | Maven / Vite | - |
+## Stack
 
-## Struttura Progetto
+| Layer | Tecnologia |
+|-------|------------|
+| UI | React 18 + TypeScript strict, Vite 5, Tailwind 3 |
+| 3D | three.js + @react-three/fiber + drei (InstancedMesh per tipo container, `frameloop="demand"`) |
+| State | zustand (`yardStore` dati + mutazioni ottimistiche, `uiStore` UI, `authStore` sessione/ruoli) |
+| Realtime | SSE `GET /api/workhub/yards/{id}/stream` (`services/yardEvents.ts`) + polling di fallback 15 s |
+| Auth | Keycloak password grant (`api/authApi.ts`), refresh unico in `api/WorkHubAPI.ts` |
+| Test/lint | vitest (`npm test`), ESLint 9 flat (`npm run lint`), `tsc` in `npm run build` |
+| Deploy | Docker multi-stage → nginx (`nginx.conf`: proxy `/api`, SSE senza buffering, `/config.js` runtime) |
+
+## Struttura `src/`
 
 ```
-BERLink/
-├── backend/                  # Spring Boot API
-│   └── src/main/java/com/containermgmt/
-│       ├── controller/       # REST endpoints
-│       ├── service/          # Business logic
-│       ├── repository/       # Data access (query custom)
-│       ├── model/            # ActiveJDBC models
-│       ├── dto/              # Data Transfer Objects
-│       ├── config/           # Spring configs
-│       └── integration/      # TFP, TIR, Waynet, AIAgent
-│
-├── frontend/                 # SvelteKit app
-│   └── src/
-│       ├── routes/           # Pages (scadenziario/, timesheets/, etc.)
-│       ├── components/       # Svelte components (*Modal, *Table, *Form)
-│       └── lib/
-│           ├── api/          # HTTP client + modules
-│           ├── stores/       # Svelte stores
-│           └── constants/    # Roles, event types
-│
-├── database/
-│   ├── migration/            # Versioned migrations (1.6.0 → 1.9.4)
-│   └── sql/                  # DDL, DML, Views, Indexes
-│
-├── keycloak/themes/          # Custom login theme
-├── prompt/                   # Documentazione dettagliata
-└── docker-compose.yml        # Orchestrazione servizi
+api/        config.ts (runtime > VITE_* > default), authApi.ts, WorkHubAPI.ts (ApiError con status/body/currentData)
+constants/  roles.ts (WRITE = cd,logs,resources; ADMIN = cd), containerSizes.ts, yardConfig.ts
+services/   yardEvents.ts (SSE, backoff, polling, pausa tab nascosto)
+store/      yardStore.ts, uiStore.ts, authStore.ts, notificationStore.ts
+utils/      slotLayout.ts (regole slot: span 2 sul bay dispari, colonna omogenea, tier=top+1, cascadePreview), logger.ts, registry.ts, format.ts
+hooks/      useSlotDrag.ts (tap = seleziona, long-press 300 ms = presa), useYardEvents.ts, usePlacePending.ts, useMediaQuery.ts
+components/ 3d/ (Yard3D, Block3D, ContainersInstanced, SlotHighlight, ContainerLabels, PulseMarker, Controls, Grid3D, YardAreas3D)
+            2d/MapView2D.tsx · ui/ (Toolbar, ContainerPanel, ContainerEditForm, ContainerHistory, ContainerList, FindContainer, AddContainerModal, StatusBanners, ConfirmDialog, ErrorBoundary, Toast) · layout/
+types/      container.ts, yard.ts (Block, YardSnapshot, YardEvent), auth.ts
 ```
 
-## Convenzioni Naming
+## Regole di dominio (specchio del backend `YardSlotService`)
 
-| Contesto | Convenzione | Esempio |
-|----------|-------------|---------|
-| Java Classes | PascalCase | `TimesheetController`, `DeadlineService` |
-| Java Methods | camelCase | `getTimesheetsByUsername()` |
-| Database | snake_case | `id_timesheet`, `flag_approval_required` |
-| REST Endpoints | `/api/{resource}` | `/api/timesheets`, `/api/deadlines` |
-| Svelte Components | PascalCase.svelte | `DeadlineTable.svelte`, `NewTimesheetModal.svelte` |
-| Svelte Stores | camelCase.js | `permissions.js`, `chatbot.js` |
-| Routes | kebab-case | `hr-requests/`, `scadenziario/` |
+- Posizione = slot `id_block, bay, row_no, tier` (1 = terra). Label `PIAZZALE-BLOCCO-BAY-ROW`; "N° dall'alto" = `pos_from_top` (derivato dal server).
+- `20'` occupa 1 bay; `40/40HC/45HC` occupano 2 bay a partire da un bay **dispari**. Una colonna e' omogenea per ingombro.
+- Il client valida in locale (`slotLayout.canPlace`) solo per l'anteprima: la verita' e' il server. Ogni mutazione manda `version`; **409** → rollback + `loadSnapshot()`.
+- Spostamenti solo nello stesso sito; cambio sito = uscita + nuovo ingresso. La cascata (chi sta sopra scende) e' server-side: il client la applica dalla risposta/evento.
+- `position_x/y/z` del server sono cache: il rendering usa `slotLayout.slotToWorld`.
 
-## Pattern Architetturali
+## Contratto API
 
-### Backend (MVC)
-```
-Controller → Service → Repository → Model (ActiveJDBC)
-                ↓
-              DTO (response)
-```
+Riferimento: `../BERLink/prompt/API.md` §26 e `WORKHUB_DEV_PLAN_20260916.md` (sezione "Contratto API v2"). Risposte `ApiResponse<T>` snake_case; 409 di lock ottimistico con `currentData` alla radice.
 
-**ActiveJDBC**: ORM senza annotazioni, i model mappano automaticamente le tabelle DB.
-```java
-// Model: Deadline.java → tabella: flt_deadlines
-Deadline deadline = Deadline.findById(id);
-deadline.set("field_name", value);
-deadline.saveIt();
-```
-
-### Frontend (Component-based)
-- **Routes**: `+page.svelte` per ogni feature
-- **Components**: Separati per funzione (*Table, *Modal, *Form)
-- **API**: Client modulare in `lib/api/modules/`
-- **State**: Svelte stores + props
-
-## Comandi Utili
+## Comandi
 
 ```bash
-# Avvio completo
-docker-compose up -d
-
-# Solo backend
-docker-compose up -d backend
-
-# Rebuild frontend
-docker-compose build frontend && docker-compose up -d frontend
-
-# Logs
-docker-compose logs -f backend
-docker-compose logs -f frontend
-
-# Task runner (Taskfile.yml)
-task build-be    # Build backend
-task build-fe    # Build frontend
-task stop-be     # Stop backend
+npm run dev      # http://localhost:5173, /api → VITE_DEV_PROXY_TARGET (default http://localhost:8090)
+npm run build    # tsc + vite build (+ PWA)
+npm run lint
+npm test
+docker compose build && docker compose up -d   # vedi DEPLOYMENT.md
 ```
 
-## Porte Servizi
+## Convenzioni per Claude Code
 
-| Servizio | Porta |
-|----------|-------|
-| Frontend | 3000 |
-| Backend | 8080 |
-| Keycloak | 8081 |
-| PostgreSQL | 5432 |
-| Valkey | 6379 |
+1. Niente `console.*`: usare `utils/logger.ts` (debug solo in dev).
+2. Funzioni ≤ 100 righe, DRY: regole di slot solo in `utils/slotLayout.ts`, chiamate HTTP solo in `api/WorkHubAPI.ts`.
+3. Mutazioni sempre ottimistiche con rollback (pattern in `yardStore.ts`); mai fidarsi dello stato locale per la validazione finale.
+4. UI in italiano; gating con `useAuthStore().canWrite`/`isAdmin`; in sola lettura nascondere le azioni, non solo disabilitarle.
+5. Nessuna configurazione hardcoded: `api/config.ts` legge `window.__WORKHUB_CONFIG__` (generato da `docker-entrypoint.sh`), poi `VITE_*`.
+6. Nuove regole di dominio: prima nel backend BERLink (`YardSlotService` + test), poi specchiate in `slotLayout.ts` con test vitest.
+7. Cambi di contratto API: aggiornare `types/`, `WorkHubAPI.ts`, `../BERLink/prompt/API.md` §26.
 
-## Documentazione
+## Quando chiedere all'utente
 
-Documentazione dettagliata in `prompt/`:
-- `README.md` - Quick start e setup
-- `mainprompt.md` - Architettura completa
-- `API_DOCUMENTATION.md` - Endpoints API
-- `README_EMAIL_NOTIFICATIONS.md` - Sistema email
-- `TIMESHEET_IMPLEMENTATION.md` - Modulo timesheets
-- `SCADENZIARIO_GUIDE.md` (root) - Sistema scadenze
-
-## Note Importanti
-
-1. **Auth**: Tutti gli endpoint richiedono JWT Keycloak (tranne health checks)
-2. **Ruoli**: `cd`, `logs`, `admin`, `hr`, ... - definiti in `lib/constants/roles.js`
-3. **Eventi**: Sistema event stream con Valkey per notifiche real-time
-4. **File Storage**: Configurabile (filesystem default)
-5. **Export**: Excel via Apache POI (backend) e XLSX (frontend)
-
-
-
----
-
-## For Claude Code
-
-### When Creating New Features
-1. Seguire i pattern esistenti in controller/service simili
-2. Usare DTO per separare API layer da database entities
-3. Aggiungere `@Valid` per validazione request body
-4. Usare `@PreAuthorize` per controllo accessi
-5. Wrappare response in `ApiResponse<T>`
-6. Frontend: usare Svelte stores per stato condiviso
-7. Frontend: seguire pattern API client in `/lib/api/modules/`
-8. Cerca di mantenere le funzioni piccole: <= 100 righe di codice. Se una funzione fa troppe cose, spezzala in funzioni helper piu' piccole
-9. Applica principio DRY e NON DUPLICARE CODICE. Se una logica esiste in due posti, rifattorizzala in una funzione comune (o chiarisci perche' servono due implementazioni differenti se esiste un motivo valido)
-10. Implementa un mini-agile cycle: proponi -> ottieni feedback -> implementa -> review
-11. Verifica sempre il file prompt/API.md e le API esposte per capire se si puo' riusare qualche metodo o se e' necessario implementare nuove API
-
-### When encountering a bug or failing test
-1. First explain possible causes step-by-step. 
-2. Check assumptions, inputs, and relevant code paths.
-
-### When Fixing Bugs
-1. Verificare i log backend (`docker-compose logs -f backend`)
-2. Con bug critici aggiungi log (sia console che nel backend) per isolare la issue
-3. Controllare console browser per errori frontend
-4. No Silent Failures: Do not swallow exceptions silently. Always surface errors either by throwing or logging them.
-5. Verificare token JWT e permessi Keycloak
-6. Testare con ruoli diversi (cd, prisma_pm, prisma_user)
-
-### When Refactoring
-1. Mantenere backward compatibility API
-2. Aggiornare DTO se cambiano response
-3. Verificare che frontend gestisca nuovi campi
-
-### When adding / updating API
-1. Aggiorna il file API.md
-2. Non rimuovere endpoint ma rendili deprecati (per backward compatibility)
-
-
-### Questions to Ask Human
-- Business logic requirements non chiari
-- Preferenze UI/UX non specificate
-- Requisiti di performance
-- Considerazioni di sicurezza
-- Nuovi ruoli o permessi necessari
-
-
----
-
-## Keep This Updated
-
-**When to update this file:**
-- Dopo aggiunta di nuove dipendenze major
-- Dopo modifiche architetturali
-- Dopo cambio convenzioni di codice
-- Quando emergono nuovi pattern
-- Dopo milestone di progetto
+- Nuove regole operative di piazzale (es. pesi, tipi non ISO), nuovi ruoli Keycloak, requisiti di performance su tablet specifici.

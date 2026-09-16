@@ -1,74 +1,61 @@
-import { Suspense, useCallback, useRef } from 'react'
-import { Canvas, ThreeEvent } from '@react-three/fiber'
+import { Suspense, useCallback, useMemo } from 'react'
+import { Canvas, type ThreeEvent } from '@react-three/fiber'
 import { useYardStore } from '../../store/yardStore'
 import { useUIStore } from '../../store/uiStore'
-import { Container3D, DragPreview } from './Container3D'
+import { notify } from '../../store/notificationStore'
+import { useSlotDrag } from '../../hooks/useSlotDrag'
+import { usePlacePending } from '../../hooks/usePlacePending'
+import { getQualitySettings } from '../../utils/performance'
+import { baySpanOf, findSlotAt } from '../../utils/slotLayout'
 import { Grid3D } from './Grid3D'
 import { YardAreas3D } from './YardAreas3D'
 import { Controls } from './Controls'
-import { useContainerDrag } from '../../hooks/useContainerDrag'
-import type { Container } from '../../types'
+import { Block3D } from './Block3D'
+import { ContainersInstanced } from './ContainersInstanced'
+import { SlotHighlight } from './SlotHighlight'
+import { ContainerLabels } from './ContainerLabels'
+import { PulseMarker } from './PulseMarker'
 
-function Scene() {
-  const { yards, selectedYardId, containers } = useYardStore()
-  const { showGrid, showAreas, selectContainer, selectedContainerNumber, dragPreviewPosition, dragValid } = useUIStore()
-  const planeRef = useRef<THREE.Mesh>(null)
+const CLICK_SLOP_PX = 6
+
+function Scene({ highQuality }: { highQuality: boolean }) {
+  const { yards, selectedYardId, containers, blocks } = useYardStore()
+  const { showGrid, showAreas, selectContainer, selectedContainerNumber, dragTarget, pulseNumber } = useUIStore()
+  const { dragging, onContainerPointerDown, onPointerMove, onPointerUp } = useSlotDrag()
+  const { pendingEnter, placeAt } = usePlacePending()
 
   const yard = yards.find((y) => y.id_yard === selectedYardId)
-
-  const { handleDragStart, handleDragMove, handleDragEnd, draggingContainer } = useContainerDrag()
-
-  const handleSelect = useCallback(
-    (containerNumber: string) => {
-      selectContainer(selectedContainerNumber === containerNumber ? null : containerNumber)
-    },
-    [selectContainer, selectedContainerNumber]
+  const pulseContainer = useMemo(
+    () => (pulseNumber ? containers.find((c) => c.container_number === pulseNumber) ?? null : null),
+    [containers, pulseNumber]
   )
 
-  const handleContainerDragStart = useCallback(
-    (container: Container, e: ThreeEvent<PointerEvent>) => {
-      handleDragStart(container, e)
-    },
-    [handleDragStart]
-  )
-
-  const handlePointerMove = useCallback(
-    (e: ThreeEvent<PointerEvent>) => {
-      if (draggingContainer) {
-        handleDragMove(e, planeRef.current)
-      }
-    },
-    [draggingContainer, handleDragMove]
-  )
-
-  const handlePointerUp = useCallback(() => {
-    if (draggingContainer) {
-      handleDragEnd()
-    }
-  }, [draggingContainer, handleDragEnd])
-
-  const handleBackgroundClick = useCallback(
+  const handleGroundClick = useCallback(
     (e: ThreeEvent<MouseEvent>) => {
-      // Only deselect if clicking on the ground, not on a container
-      if (e.object === planeRef.current) {
-        selectContainer(null)
+      if (e.delta > CLICK_SLOP_PX) return // it was an orbit, not a tap
+      if (pendingEnter) {
+        const slot = findSlotAt(blocks, e.point.x, e.point.z, baySpanOf(pendingEnter.container_type))
+        if (!slot) {
+          notify.warning('Tocca uno slot libero dentro un blocco')
+          return
+        }
+        void placeAt(slot)
+        return
       }
+      selectContainer(null)
     },
-    [selectContainer]
+    [pendingEnter, blocks, placeAt, selectContainer]
   )
 
-  if (!yard) {
-    return null
-  }
+  if (!yard) return null
 
   return (
     <>
-      {/* Lighting */}
-      <ambientLight intensity={0.5} />
+      <ambientLight intensity={0.55} />
       <directionalLight
-        position={[yard.width, 50, yard.length / 2]}
+        position={[yard.width, 60, yard.length / 2]}
         intensity={1}
-        castShadow
+        castShadow={highQuality}
         shadow-mapSize={[2048, 2048]}
         shadow-camera-left={-yard.width}
         shadow-camera-right={yard.width}
@@ -77,59 +64,52 @@ function Scene() {
       />
       <directionalLight position={[-30, 30, -30]} intensity={0.3} />
 
-      {/* Controls */}
       <Controls yardWidth={yard.width} yardLength={yard.length} />
 
-      {/* Ground plane for raycasting */}
+      {/* Invisible ground plane: pointer target for drag, tap-to-place and deselect */}
       <mesh
-        ref={planeRef}
         rotation={[-Math.PI / 2, 0, 0]}
         position={[yard.width / 2, 0, yard.length / 2]}
-        onClick={handleBackgroundClick}
-        onPointerMove={handlePointerMove}
-        onPointerUp={handlePointerUp}
+        onClick={handleGroundClick}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
         visible={false}
       >
-        <planeGeometry args={[yard.width * 2, yard.length * 2]} />
+        <planeGeometry args={[yard.width * 3, yard.length * 3]} />
         <meshBasicMaterial />
       </mesh>
 
-      {/* Grid */}
-      <Grid3D
-        width={yard.width}
-        length={yard.length}
-        cellSize={yard.grid_cell_size}
-        visible={showGrid}
-      />
+      <Grid3D width={yard.width} length={yard.length} cellSize={yard.grid_cell_size ?? 6.1} visible={showGrid} />
+      <YardAreas3D areas={yard.areas ?? []} visible={showAreas} />
 
-      {/* Yard areas */}
-      <YardAreas3D areas={yard.areas} visible={showAreas} />
-
-      {/* Containers */}
-      {containers.map((container) => (
-        <Container3D
-          key={container.container_number}
-          container={container}
-          onSelect={handleSelect}
-          onDragStart={handleContainerDragStart}
-        />
+      {blocks.filter((b) => b.is_active).map((block) => (
+        <Block3D key={block.id_block} block={block} />
       ))}
 
-      {/* Drag preview */}
-      {dragPreviewPosition && draggingContainer && (
-        <DragPreview
-          containerType={draggingContainer.container_type}
-          position={dragPreviewPosition}
-          rotation={draggingContainer.rotation}
-          isValid={dragValid}
-        />
+      <ContainersInstanced
+        containers={containers}
+        blocks={blocks}
+        selectedNumber={selectedContainerNumber}
+        hiddenNumber={dragging?.container_number ?? null}
+        onPointerDown={onContainerPointerDown}
+      />
+
+      <ContainerLabels containers={containers} blocks={blocks} selectedNumber={selectedContainerNumber} pulseNumber={pulseNumber} />
+
+      {pulseContainer && <PulseMarker container={pulseContainer} blocks={blocks} containers={containers} />}
+
+      {dragging && dragTarget && (
+        <SlotHighlight target={dragTarget} container={dragging} blocks={blocks} containers={containers} />
       )}
     </>
   )
 }
 
 export function Yard3D() {
-  const { selectedYardId, isLoadingContainers } = useYardStore()
+  const { selectedYardId, isLoadingContainers, blocks } = useYardStore()
+  const quality = useMemo(() => getQualitySettings(), [])
+  const highQuality = quality.shadowMapSize >= 2048
+  const dpr = Math.min(Math.max(quality.pixelRatio, 1), 1.5)
 
   if (!selectedYardId) {
     return (
@@ -140,26 +120,29 @@ export function Yard3D() {
   }
 
   return (
-    <div className="w-full h-full relative">
+    <div className="w-full h-full relative touch-none select-none">
       {isLoadingContainers && (
-        <div className="absolute inset-0 bg-slate-900/50 flex items-center justify-center z-10">
-          <div className="text-white">Caricamento container...</div>
+        <div className="absolute inset-0 bg-slate-900/50 flex items-center justify-center z-10 pointer-events-none">
+          <div className="text-white">Caricamento piazzale...</div>
+        </div>
+      )}
+      {!isLoadingContainers && blocks.length === 0 && (
+        <div className="absolute top-3 left-1/2 -translate-x-1/2 z-10 px-3 py-1.5 rounded-lg bg-amber-500/20 border border-amber-500/50 text-amber-300 text-xs">
+          Nessun blocco configurato per questo piazzale
         </div>
       )}
       <Canvas
-        shadows
+        frameloop="demand"
+        shadows={highQuality}
+        dpr={dpr}
         camera={{ position: [60, 40, 60], fov: 50, near: 0.1, far: 1000 }}
-        gl={{ antialias: true, alpha: false }}
-        onCreated={({ gl }) => {
-          gl.setClearColor('#1a1a2e')
-        }}
+        gl={{ antialias: quality.antialias, alpha: false, powerPreference: 'high-performance' }}
+        onCreated={({ gl }) => gl.setClearColor('#1a1a2e')}
       >
         <Suspense fallback={null}>
-          <Scene />
+          <Scene highQuality={highQuality} />
         </Suspense>
       </Canvas>
     </div>
   )
 }
-
-import * as THREE from 'three'

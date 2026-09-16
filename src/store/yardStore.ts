@@ -1,266 +1,324 @@
 import { create } from 'zustand'
-import { workHubAPI } from '../api/WorkHubAPI'
+import { workHubAPI, ApiError } from '../api/WorkHubAPI'
 import { API_CONFIG, STORAGE_KEYS } from '../api/config'
-import { calculateGravityCascade, calculateGravityAfterMove } from '../utils/gravityLogic'
-import type { Yard, Container, ContainerCreateRequest, ContainerUpdateRequest, YardStats, Site } from '../types'
+import { logger } from '../utils/logger'
+import { notify } from './notificationStore'
+import { baySpanOf, canPlace, cascadePreview, isPlaced, labelOf, posFromTop } from '../utils/slotLayout'
+import type {
+  Block,
+  Container,
+  ContainerEnterRequest,
+  ContainerPatchRequest,
+  Site,
+  SlotRef,
+  Yard,
+  YardEvent,
+  YardStats,
+} from '../types'
 
 interface YardStore {
-  // Data
   sites: Site[]
   yards: Yard[]
   containers: Container[]
+  blocks: Block[]
+  /** Yard revision from the last snapshot / event / mutation; drives SSE delta application. */
+  revision: number
+  yardCode: string
 
-  // Selection
   selectedSiteId: number | null
   selectedYardId: number | null
 
-  // Loading states
   isLoadingSites: boolean
   isLoadingYards: boolean
   isLoadingContainers: boolean
   error: string | null
 
-  // Actions
   loadSites: () => Promise<void>
-  setSites: (sites: Site[]) => void
   selectSite: (siteId: number) => Promise<void>
   selectYard: (yardId: number) => Promise<void>
   loadYards: (siteId: number) => Promise<void>
-  loadContainers: (yardId: number) => Promise<void>
-  addContainer: (data: ContainerCreateRequest) => Promise<Container>
-  updateContainer: (containerNumber: string, data: ContainerUpdateRequest) => Promise<Container>
-  removeContainer: (containerNumber: string) => Promise<void>
-  removeContainerWithGravity: (containerNumber: string) => Promise<{ fallenContainers: string[] }>
-  applyGravityAfterMove: (containerNumber: string, newPosition: { x: number; y: number; z: number }) => Promise<{ fallenContainers: string[] }>
+  loadSnapshot: (yardId?: number) => Promise<void>
+
+  enterContainer: (data: Omit<ContainerEnterRequest, keyof SlotRef>, slot: SlotRef) => Promise<Container | null>
+  moveContainer: (containerNumber: string, slot: SlotRef) => Promise<boolean>
+  patchContainer: (containerNumber: string, patch: Omit<ContainerPatchRequest, 'version'>) => Promise<Container | null>
+  exitContainer: (containerNumber: string, note?: string) => Promise<boolean>
+  applyYardEvent: (event: YardEvent) => void
+
   getContainer: (containerNumber: string) => Container | undefined
   getYardStats: () => YardStats
   initializeFromStorage: () => Promise<void>
 }
 
-export const useYardStore = create<YardStore>((set, get) => ({
-  // Initial state
-  sites: [],
-  yards: [],
-  containers: [],
-  selectedSiteId: null,
-  selectedYardId: null,
-  isLoadingSites: false,
-  isLoadingYards: false,
-  isLoadingContainers: false,
-  error: null,
+function errorMessage(err: unknown, fallback: string): string {
+  return err instanceof Error ? err.message : fallback
+}
 
-  loadSites: async () => {
-    set({ isLoadingSites: true, error: null })
-    try {
-      const response = await workHubAPI.getSites()
-      set({ sites: response.data, isLoadingSites: false })
-    } catch (err) {
-      set({
-        error: err instanceof Error ? err.message : 'Errore caricamento siti',
-        isLoadingSites: false,
-      })
-    }
-  },
+/** Replaces (or appends) containers by number. */
+function upsertAll(list: Container[], updates: Container[]): Container[] {
+  const byNumber = new Map(list.map((c) => [c.container_number, c]))
+  for (const u of updates) byNumber.set(u.container_number, u)
+  return Array.from(byNumber.values())
+}
 
-  setSites: (sites) => set({ sites }),
+/** Recomputes the derived `pos_from_top` after a local (optimistic) change. */
+function withPosFromTop(list: Container[]): Container[] {
+  return list.map((c) => ({ ...c, pos_from_top: posFromTop(list, c) }))
+}
 
-  selectSite: async (siteId) => {
-    set({ selectedSiteId: siteId, selectedYardId: null, yards: [], containers: [] })
-    localStorage.setItem(STORAGE_KEYS.lastSite, siteId.toString())
-    await get().loadYards(siteId)
-  },
-
-  selectYard: async (yardId) => {
-    set({ selectedYardId: yardId, containers: [] })
-    localStorage.setItem(STORAGE_KEYS.lastYard, yardId.toString())
-    await get().loadContainers(yardId)
-  },
-
-  loadYards: async (siteId) => {
-    set({ isLoadingYards: true, error: null })
-    try {
-      const response = await workHubAPI.getYards(siteId)
-      set({ yards: response.data, isLoadingYards: false })
-    } catch (err) {
-      set({
-        error: err instanceof Error ? err.message : 'Errore caricamento piazzali',
-        isLoadingYards: false,
-      })
-    }
-  },
-
-  loadContainers: async (yardId) => {
-    set({ isLoadingContainers: true, error: null })
-    try {
-      const response = await workHubAPI.getContainers({ yardId })
-      set({ containers: response.data, isLoadingContainers: false })
-    } catch (err) {
-      set({
-        error: err instanceof Error ? err.message : 'Errore caricamento container',
-        isLoadingContainers: false,
-      })
-    }
-  },
-
-  addContainer: async (data) => {
-    const response = await workHubAPI.createContainer(data)
-    set((state) => ({
-      containers: [...state.containers, response.data],
-    }))
-    return response.data
-  },
-
-  updateContainer: async (containerNumber, data) => {
-    console.log('[DEBUG] yardStore.updateContainer - containerNumber:', containerNumber, 'data:', data)
-    const response = await workHubAPI.updateContainer(containerNumber, data)
-    console.log('[DEBUG] yardStore.updateContainer - API response:', response)
-    set((state) => ({
-      containers: state.containers.map((c) =>
-        c.container_number === containerNumber
-          ? { ...c, ...response.data } // Merge: mantieni campi esistenti, aggiorna con response
-          : c
-      ),
-    }))
-    return response.data
-  },
-
-  removeContainer: async (containerNumber) => {
-    await workHubAPI.deleteContainer(containerNumber)
-    set((state) => ({
-      containers: state.containers.filter((c) => c.container_number !== containerNumber),
-    }))
-  },
-
-  removeContainerWithGravity: async (containerNumber) => {
-    console.log('[yardStore] removeContainerWithGravity called for:', containerNumber)
-    const { containers, updateContainer } = get()
-    console.log('[yardStore] Current containers count:', containers.length)
-
-    // Calculate which containers will fall before removing
-    const cascadeUpdates = calculateGravityCascade(containerNumber, containers)
-    console.log('[yardStore] Cascade updates:', cascadeUpdates)
-
-    // Delete the container from API
-    await workHubAPI.deleteContainer(containerNumber)
-    console.log('[yardStore] Container deleted from API')
-
-    // Remove from local state first
-    set((state) => ({
-      containers: state.containers.filter((c) => c.container_number !== containerNumber),
-    }))
-
-    // Apply gravity updates to fallen containers
-    const fallenContainers: string[] = []
-    for (const update of cascadeUpdates) {
-      try {
-        console.log('[yardStore] Updating fallen container:', update.containerNumber, 'to Z:', update.newZ)
-        await updateContainer(update.containerNumber, { position_z: update.newZ })
-        fallenContainers.push(update.containerNumber)
-        console.log('[yardStore] Update successful')
-      } catch (err) {
-        console.error(`[Gravity] Failed to update container ${update.containerNumber}:`, err)
-      }
-    }
-
-    console.log('[yardStore] Fallen containers:', fallenContainers)
-    return { fallenContainers }
-  },
-
-  applyGravityAfterMove: async (containerNumber, newPosition) => {
-    console.log('[yardStore] applyGravityAfterMove called for:', containerNumber, 'to:', newPosition)
-    const { containers, updateContainer } = get()
-
-    // Calculate which containers will fall after this move
-    const cascadeUpdates = calculateGravityAfterMove(containerNumber, newPosition, containers)
-    console.log('[yardStore] Gravity cascade updates:', cascadeUpdates)
-
-    // Apply gravity updates to fallen containers
-    const fallenContainers: string[] = []
-    for (const update of cascadeUpdates) {
-      try {
-        console.log('[yardStore] Updating fallen container:', update.containerNumber, 'to Z:', update.newZ)
-        await updateContainer(update.containerNumber, { position_z: update.newZ })
-        fallenContainers.push(update.containerNumber)
-      } catch (err) {
-        console.error(`[Gravity] Failed to update container ${update.containerNumber}:`, err)
-      }
-    }
-
-    return { fallenContainers }
-  },
-
-  getContainer: (containerNumber) => {
-    return get().containers.find((c) => c.container_number === containerNumber)
-  },
-
-  getYardStats: () => {
-    const { containers, yards, selectedYardId } = get()
-    const yard = yards.find((y) => y.id_yard === selectedYardId)
-
-    const containersByType: Record<string, number> = {}
-    const containersByStatus: Record<string, number> = {}
-
-    for (const c of containers) {
-      containersByType[c.container_type] = (containersByType[c.container_type] || 0) + 1
-      containersByStatus[c.status] = (containersByStatus[c.status] || 0) + 1
-    }
-
-    // Rough capacity calculation (ground slots only)
-    const gridSize = yard?.grid_cell_size || 2.4
-    const yardWidth = yard?.width || 100
-    const yardLength = yard?.length || 50
-    const maxCapacity = Math.floor((yardWidth / (12.2 + gridSize)) * (yardLength / gridSize))
-
-    return {
-      totalContainers: containers.length,
-      containersByType,
-      containersByStatus,
-      capacityUsed: containers.length,
-      maxCapacity,
-    }
-  },
-
-  initializeFromStorage: async () => {
-    // First, load sites from API
-    await get().loadSites()
-
-    const { sites } = get()
-    if (sites.length === 0) {
-      return
-    }
-
-    const lastSite = localStorage.getItem(STORAGE_KEYS.lastSite)
-    const lastYard = localStorage.getItem(STORAGE_KEYS.lastYard)
-
-    // Determine which site to select: saved site or first available
-    let siteId: number
-    if (lastSite) {
-      const savedSiteId = parseInt(lastSite, 10)
-      // Check if saved site still exists
-      if (sites.some((s) => s.id_site === savedSiteId)) {
-        siteId = savedSiteId
-      } else {
-        siteId = sites[0].id_site
-      }
+export const useYardStore = create<YardStore>((set, get) => {
+  /** Rollback helper for optimistic mutations: restores state, explains, reloads. */
+  const recover = async (before: Container[], err: unknown, fallback: string) => {
+    set({ containers: before })
+    if (err instanceof ApiError && err.status === 409) {
+      notify.warning(err.message || 'Conflitto: il piazzale e\' stato modificato da un altro utente')
     } else {
-      siteId = API_CONFIG.defaultSiteId || sites[0].id_site
+      notify.error(errorMessage(err, fallback))
     }
+    logger.warn(fallback, err)
+    await get().loadSnapshot()
+  }
 
-    await get().selectSite(siteId)
+  return {
+    sites: [],
+    yards: [],
+    containers: [],
+    blocks: [],
+    revision: 0,
+    yardCode: '',
+    selectedSiteId: null,
+    selectedYardId: null,
+    isLoadingSites: false,
+    isLoadingYards: false,
+    isLoadingContainers: false,
+    error: null,
 
-    // Select yard
-    const { yards } = get()
-    if (yards.length > 0) {
-      if (lastYard) {
-        const yardId = parseInt(lastYard, 10)
-        if (yards.some((y) => y.id_yard === yardId)) {
-          await get().selectYard(yardId)
-        } else {
-          await get().selectYard(yards[0].id_yard)
-        }
-      } else {
-        await get().selectYard(yards[0].id_yard)
+    loadSites: async () => {
+      set({ isLoadingSites: true, error: null })
+      try {
+        const response = await workHubAPI.getSites()
+        set({ sites: response.data, isLoadingSites: false })
+      } catch (err) {
+        logger.error('Caricamento siti fallito', err)
+        set({ error: errorMessage(err, 'Errore caricamento siti'), isLoadingSites: false })
       }
-    }
-  },
-}))
+    },
+
+    selectSite: async (siteId) => {
+      set({ selectedSiteId: siteId, selectedYardId: null, yards: [], containers: [], blocks: [], revision: 0 })
+      localStorage.setItem(STORAGE_KEYS.lastSite, siteId.toString())
+      await get().loadYards(siteId)
+    },
+
+    selectYard: async (yardId) => {
+      set({ selectedYardId: yardId, containers: [], blocks: [], revision: 0 })
+      localStorage.setItem(STORAGE_KEYS.lastYard, yardId.toString())
+      await get().loadSnapshot(yardId)
+    },
+
+    loadYards: async (siteId) => {
+      set({ isLoadingYards: true, error: null })
+      try {
+        const response = await workHubAPI.getYards(siteId)
+        set({ yards: response.data, isLoadingYards: false })
+      } catch (err) {
+        logger.error('Caricamento piazzali fallito', err)
+        set({ error: errorMessage(err, 'Errore caricamento piazzali'), isLoadingYards: false })
+      }
+    },
+
+    loadSnapshot: async (yardId) => {
+      const id = yardId ?? get().selectedYardId
+      if (!id) return
+      set({ isLoadingContainers: true, error: null })
+      try {
+        const { data } = await workHubAPI.getSnapshot(id)
+        if (get().selectedYardId !== id) return // yard changed while loading
+        set({
+          containers: data.containers,
+          blocks: data.yard.blocks ?? [],
+          revision: data.revision,
+          yardCode: data.yard.code,
+          yards: get().yards.map((y) => (y.id_yard === id ? { ...y, ...data.yard } : y)),
+          isLoadingContainers: false,
+        })
+      } catch (err) {
+        logger.error('Caricamento piazzale fallito', err)
+        set({ error: errorMessage(err, 'Errore caricamento piazzale'), isLoadingContainers: false })
+      }
+    },
+
+    enterContainer: async (data, slot) => {
+      const { blocks, containers, yardCode } = get()
+      const check = canPlace({ container_number: data.container_number, container_type: data.container_type ?? '40' }, slot, blocks, containers)
+      if (!check.ok) {
+        notify.warning(check.reason ?? 'Posizione non valida')
+        return null
+      }
+      const block = blocks.find((b) => b.id_block === slot.id_block)
+      const optimistic: Container = {
+        container_number: data.container_number,
+        id_yard: get().selectedYardId ?? 0,
+        id_block: slot.id_block,
+        bay: slot.bay,
+        bay_span: baySpanOf(data.container_type ?? '40'),
+        row_no: slot.row_no,
+        tier: check.tier,
+        label: labelOf(yardCode, block?.code ?? '?', slot.bay, slot.row_no),
+        container_type: data.container_type ?? '40',
+        position_x: 0,
+        position_y: 0,
+        position_z: 0,
+        rotation: (block?.orientation ?? 0) as Container['rotation'],
+        color: data.color ?? null,
+        content_description: data.content_description ?? null,
+        notes: data.notes ?? null,
+        status: data.status ?? 'active',
+        version: 0,
+      }
+      const before = containers
+      set({ containers: withPosFromTop(upsertAll(containers, [optimistic])) })
+      try {
+        const response = await workHubAPI.enterContainer({ ...data, ...slot, tier: check.tier })
+        set((s) => ({ containers: withPosFromTop(upsertAll(s.containers, [response.data])) }))
+        if (response.message) notify.warning(response.message)
+        return response.data
+      } catch (err) {
+        await recover(before, err, 'Ingresso container fallito')
+        return null
+      }
+    },
+
+    moveContainer: async (containerNumber, slot) => {
+      const { blocks, containers, yardCode } = get()
+      const current = containers.find((c) => c.container_number === containerNumber)
+      if (!current) return false
+      const check = canPlace(current, slot, blocks, containers)
+      if (!check.ok) {
+        notify.warning(check.reason ?? 'Posizione non valida')
+        return false
+      }
+      const block = blocks.find((b) => b.id_block === slot.id_block)
+      const moved: Container = {
+        ...current,
+        id_block: slot.id_block,
+        bay: slot.bay,
+        row_no: slot.row_no,
+        tier: check.tier,
+        label: labelOf(yardCode, block?.code ?? '?', slot.bay, slot.row_no),
+        rotation: (block?.orientation ?? 0) as Container['rotation'],
+      }
+      const cascaded = isPlaced(current) ? cascadePreview(containers, current) : []
+      const before = containers
+      set({ containers: withPosFromTop(upsertAll(containers, [moved, ...cascaded])) })
+      try {
+        const { data } = await workHubAPI.moveContainer(containerNumber, { ...slot, tier: check.tier, version: current.version })
+        set((s) => ({
+          containers: withPosFromTop(upsertAll(s.containers, [data.moved, ...data.cascaded])),
+          revision: Math.max(s.revision, data.revision),
+        }))
+        return true
+      } catch (err) {
+        await recover(before, err, 'Spostamento fallito')
+        return false
+      }
+    },
+
+    patchContainer: async (containerNumber, patch) => {
+      const before = get().containers
+      const current = before.find((c) => c.container_number === containerNumber)
+      if (!current) return null
+      set({ containers: upsertAll(before, [{ ...current, ...patch }]) })
+      try {
+        const { data } = await workHubAPI.patchContainer(containerNumber, { ...patch, version: current.version })
+        set((s) => ({ containers: upsertAll(s.containers, [data]) }))
+        return data
+      } catch (err) {
+        await recover(before, err, 'Aggiornamento fallito')
+        return null
+      }
+    },
+
+    exitContainer: async (containerNumber, note) => {
+      const before = get().containers
+      const current = before.find((c) => c.container_number === containerNumber)
+      if (!current) return false
+      const cascaded = isPlaced(current) ? cascadePreview(before, current) : []
+      set({
+        containers: withPosFromTop(upsertAll(before, cascaded).filter((c) => c.container_number !== containerNumber)),
+      })
+      try {
+        const { data } = await workHubAPI.exitContainer(containerNumber, { version: current.version, note: note ?? null })
+        set((s) => ({
+          containers: withPosFromTop(upsertAll(s.containers, data.cascaded)),
+          revision: Math.max(s.revision, data.revision),
+        }))
+        return true
+      } catch (err) {
+        await recover(before, err, 'Uscita container fallita')
+        return false
+      }
+    },
+
+    applyYardEvent: (event) => {
+      const { selectedYardId, revision } = get()
+      if (event.id_yard !== selectedYardId) return
+      if (event.type === 'LAYOUT') {
+        void get().loadSnapshot()
+        return
+      }
+      if (event.revision <= revision) return // already applied (e.g. our own mutation)
+      if (event.revision !== revision + 1) {
+        logger.debug(`Evento fuori sequenza (locale ${revision}, ricevuto ${event.revision}): ricarico`)
+        void get().loadSnapshot()
+        return
+      }
+      const removed = new Set(event.removed ?? [])
+      set((s) => ({
+        containers: withPosFromTop(
+          upsertAll(s.containers, event.containers ?? []).filter((c) => !removed.has(c.container_number))
+        ),
+        revision: event.revision,
+      }))
+    },
+
+    getContainer: (containerNumber) => get().containers.find((c) => c.container_number === containerNumber),
+
+    getYardStats: () => {
+      const { containers, blocks } = get()
+      const containersByType: Record<string, number> = {}
+      const containersByStatus: Record<string, number> = {}
+      let capacityUsed = 0
+      let unallocated = 0
+      for (const c of containers) {
+        containersByType[c.container_type] = (containersByType[c.container_type] || 0) + 1
+        containersByStatus[c.status] = (containersByStatus[c.status] || 0) + 1
+        if (isPlaced(c)) capacityUsed += c.bay_span
+        else unallocated += 1
+      }
+      const maxCapacity = blocks.filter((b) => b.is_active).reduce((sum, b) => sum + b.n_bays * b.n_rows * b.max_tier, 0)
+      return { totalContainers: containers.length, unallocated, containersByType, containersByStatus, capacityUsed, maxCapacity }
+    },
+
+    initializeFromStorage: async () => {
+      await get().loadSites()
+
+      const { sites } = get()
+      if (sites.length === 0) return
+
+      const lastSite = localStorage.getItem(STORAGE_KEYS.lastSite)
+      const lastYard = localStorage.getItem(STORAGE_KEYS.lastYard)
+
+      const savedSiteId = lastSite ? parseInt(lastSite, 10) : API_CONFIG.defaultSiteId
+      const siteId = sites.some((s) => s.id_site === savedSiteId) ? savedSiteId : sites[0].id_site
+      await get().selectSite(siteId)
+
+      const { yards } = get()
+      if (yards.length === 0) return
+
+      const savedYardId = lastYard ? parseInt(lastYard, 10) : NaN
+      const yardId = yards.some((y) => y.id_yard === savedYardId) ? savedYardId : yards[0].id_yard
+      await get().selectYard(yardId)
+    },
+  }
+})

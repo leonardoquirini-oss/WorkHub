@@ -6,8 +6,9 @@ services:
       context: .
       dockerfile: Dockerfile
       args:
-        # Build-time environment variables (baked into the build)
-        VITE_KEYCLOAK_URL: ${VITE_KEYCLOAK_URL:-http://192.168.0.12:8080}
+        # Build-time fallbacks. The same variables, when set in `environment`, are written
+        # to /config.js at container start and take precedence (no rebuild needed).
+        VITE_KEYCLOAK_URL: ${VITE_KEYCLOAK_URL:-http://localhost:8080}
         VITE_KEYCLOAK_REALM: ${VITE_KEYCLOAK_REALM:-gb-realm}
         VITE_KEYCLOAK_CLIENT_ID: ${VITE_KEYCLOAK_CLIENT_ID:-berlink-client}
         VITE_API_URL: ${VITE_API_URL:-/api}
@@ -18,9 +19,14 @@ services:
     ports:
       - "${WORKHUB_PORT:-5173}:80"
     environment:
-      # Runtime environment variables
+      # nginx upstream for /api (Docker network name of the BERLink backend)
       - BACKEND_URL=${BACKEND_URL:-http://backend:8080}
-      - RUNTIME_CONFIG=${RUNTIME_CONFIG:-false}
+      # Runtime config written to /config.js (empty = keep build-time value)
+      - VITE_KEYCLOAK_URL=${VITE_KEYCLOAK_URL:-}
+      - VITE_KEYCLOAK_REALM=${VITE_KEYCLOAK_REALM:-}
+      - VITE_KEYCLOAK_CLIENT_ID=${VITE_KEYCLOAK_CLIENT_ID:-}
+      - VITE_API_URL=${VITE_API_URL:-}
+      - VITE_DEFAULT_SITE_ID=${VITE_DEFAULT_SITE_ID:-}
       - TZ=Europe/Rome
     networks:
       - berlink-network

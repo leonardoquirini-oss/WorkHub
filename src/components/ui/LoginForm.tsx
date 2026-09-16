@@ -110,7 +110,7 @@ export function LoginForm() {
 
           {/* Footer */}
           <p className="mt-6 text-center text-xs text-slate-500">
-            BERLink Platform - WorkHub v1.0
+            BERLink Platform - WorkHub v2.0
           </p>
         </div>
       </div>

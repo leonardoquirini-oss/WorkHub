@@ -53,23 +53,3 @@ export const DEFAULT_CONTAINER_COLORS = [
   '#ec4899', // Pink
   '#84cc16', // Lime
 ]
-
-export function getContainerDimensions(type: ContainerType): ContainerDimensions {
-  return CONTAINER_DIMENSIONS[type]
-}
-
-export function getRotatedDimensions(
-  type: ContainerType,
-  rotation: number
-): { length: number; width: number; height: number } {
-  const dims = CONTAINER_DIMENSIONS[type]
-  // For 90 or 270 degree rotation, swap length and width
-  if (rotation === 90 || rotation === 270) {
-    return {
-      length: dims.width,
-      width: dims.length,
-      height: dims.height,
-    }
-  }
-  return { ...dims }
-}

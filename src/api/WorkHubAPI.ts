@@ -1,56 +1,131 @@
 import { API_CONFIG } from './config'
 import { refreshAccessToken } from './authApi'
+import { logger } from '../utils/logger'
 import type {
   ApiResponse,
   Container,
-  ContainerCreateRequest,
-  ContainerUpdateRequest,
+  ContainerEnterRequest,
+  ContainerExitRequest,
+  ContainerMoveRequest,
+  ContainerPatchRequest,
+  ExitResponse,
+  MoveResponse,
+  Movement,
+  PositionInfo,
   Site,
   Yard,
+  YardSnapshot,
   UnitSearchResult,
   TokenData,
+  User,
 } from '../types'
 
+/** HTTP error raised by the API client; `body` is the parsed JSON error payload when available. */
+export class ApiError extends Error {
+  constructor(
+    public readonly status: number,
+    message: string,
+    public readonly body: unknown = null
+  ) {
+    super(message)
+    this.name = 'ApiError'
+  }
+
+  /** `currentData` sent by the server on optimistic-lock conflicts (409). */
+  get currentData(): Container | null {
+    const body = this.body as { currentData?: Container } | null
+    return body?.currentData ?? null
+  }
+}
+
+export interface SessionCallbacks {
+  /** Called after a successful silent token refresh. */
+  onTokenRefreshed?: (tokenData: TokenData, user: User) => void
+  /** Called when the session cannot be continued (refresh failed or server answered 401). */
+  onSessionExpired?: (reason: string) => void
+}
+
+type TokenListener = (tokenData: TokenData) => void
+
+/**
+ * Single API client for BERLink. Owns the access token and is the only place where the
+ * token is refreshed: every request goes through `ensureValidToken()`.
+ */
 class WorkHubAPI {
   private tokenData: TokenData | null = null
   private refreshPromise: Promise<void> | null = null
+  private callbacks: SessionCallbacks = {}
+  private tokenListeners = new Set<TokenListener>()
 
   setTokenData(tokenData: TokenData | null) {
     this.tokenData = tokenData
   }
 
-  private async ensureValidToken(): Promise<string> {
+  getTokenData(): TokenData | null {
+    return this.tokenData
+  }
+
+  setSessionCallbacks(callbacks: SessionCallbacks) {
+    this.callbacks = callbacks
+  }
+
+  /** Subscribe to token refreshes (used by the SSE client, which embeds the token in its URL). */
+  addTokenRefreshListener(listener: TokenListener): () => void {
+    this.tokenListeners.add(listener)
+    return () => this.tokenListeners.delete(listener)
+  }
+
+  /** Returns a valid access token, refreshing it first when it is about to expire. */
+  async ensureValidToken(): Promise<string> {
     if (!this.tokenData) {
-      throw new Error('Non autenticato')
+      throw new ApiError(401, 'Non autenticato')
     }
 
-    // Check if token needs refresh
     if (Date.now() > this.tokenData.tokenExpiry - API_CONFIG.tokenRefreshBuffer) {
-      // Prevent multiple concurrent refresh attempts
+      // Concurrent callers share one refresh round-trip
       if (!this.refreshPromise) {
-        this.refreshPromise = this.doRefresh()
+        this.refreshPromise = this.doRefresh().finally(() => {
+          this.refreshPromise = null
+        })
       }
       await this.refreshPromise
-      this.refreshPromise = null
     }
 
+    if (!this.tokenData) {
+      throw new ApiError(401, 'Sessione scaduta')
+    }
     return this.tokenData.accessToken
   }
 
   private async doRefresh(): Promise<void> {
-    if (!this.tokenData?.refreshToken) {
-      throw new Error('Sessione scaduta')
+    const refreshToken = this.tokenData?.refreshToken
+    if (!refreshToken) {
+      this.expireSession('Sessione scaduta')
+      throw new ApiError(401, 'Sessione scaduta')
     }
 
-    const { tokenData } = await refreshAccessToken(this.tokenData.refreshToken)
-    this.tokenData = tokenData
+    try {
+      const { tokenData, user } = await refreshAccessToken(refreshToken)
+      this.tokenData = tokenData
+      this.callbacks.onTokenRefreshed?.(tokenData, user)
+      this.tokenListeners.forEach((listener) => listener(tokenData))
+      logger.debug('Token aggiornato, scadenza', new Date(tokenData.tokenExpiry).toISOString())
+    } catch (err) {
+      this.expireSession(err instanceof Error ? err.message : 'Sessione scaduta')
+      throw err
+    }
+  }
+
+  private expireSession(reason: string) {
+    this.tokenData = null
+    this.callbacks.onSessionExpired?.(reason)
   }
 
   private async fetch<T>(url: string, options: RequestInit = {}): Promise<T> {
     const token = await this.ensureValidToken()
     const fullUrl = `${API_CONFIG.apiUrl}${url}`
-
-    console.log(`[DEBUG] fetch - ${options.method || 'GET'} ${fullUrl}`)
+    const method = options.method ?? 'GET'
+    logger.debug(`${method} ${fullUrl}`)
 
     const response = await fetch(fullUrl, {
       ...options,
@@ -61,82 +136,86 @@ class WorkHubAPI {
       },
     })
 
-    console.log(`[DEBUG] fetch - Response status: ${response.status}`)
-
     if (!response.ok) {
       const errorText = await response.text()
-      console.error(`[DEBUG] fetch - Error response body:`, errorText)
+      let body: unknown = null
+      let message = `Errore HTTP: ${response.status}`
+      try {
+        body = JSON.parse(errorText)
+        message = (body as { message?: string }).message || message
+      } catch {
+        // error body is not JSON
+      }
 
       if (response.status === 401) {
-        throw new Error('Non autorizzato')
+        message = 'Non autorizzato'
+        this.expireSession(message)
       }
 
-      let errorMessage = `Errore HTTP: ${response.status}`
-      try {
-        const errorData = JSON.parse(errorText)
-        errorMessage = errorData.message || errorMessage
-      } catch {
-        // errorText is not JSON
-      }
-      throw new Error(errorMessage)
+      logger.warn(`${method} ${fullUrl} → ${response.status}`, errorText)
+      throw new ApiError(response.status, message, body)
     }
 
-    return response.json()
+    if (response.status === 204) {
+      return undefined as T
+    }
+    return response.json() as Promise<T>
   }
 
-  // === SITES ===
+  private json(method: 'POST' | 'PUT' | 'PATCH', body: unknown): RequestInit {
+    return { method, body: JSON.stringify(body) }
+  }
+
+  private containerPath(containerNumber: string, suffix = ''): string {
+    return `/workhub/containers/${encodeURIComponent(containerNumber)}${suffix}`
+  }
+
+  // === SITES / YARDS ===
 
   async getSites(onlyWithYards = true): Promise<ApiResponse<Site[]>> {
     return this.fetch(`/workhub/sites?onlyWithYards=${onlyWithYards}`)
   }
 
-  // === YARDS ===
-
   async getYards(siteId: number): Promise<ApiResponse<Yard[]>> {
     return this.fetch(`/workhub/yards?siteId=${siteId}`)
   }
 
+  /** Full state of a yard (layout + containers) with its `revision`. */
+  async getSnapshot(yardId: number): Promise<ApiResponse<YardSnapshot>> {
+    return this.fetch(`/workhub/yards/${yardId}/snapshot`)
+  }
+
   // === CONTAINERS ===
 
-  async getContainers(params: { siteId?: number; yardId?: number }): Promise<ApiResponse<Container[]>> {
-    const searchParams = new URLSearchParams()
-    if (params.siteId) searchParams.append('siteId', params.siteId.toString())
-    if (params.yardId) searchParams.append('yardId', params.yardId.toString())
-    return this.fetch(`/workhub/containers?${searchParams}`)
+  async enterContainer(data: ContainerEnterRequest): Promise<ApiResponse<Container>> {
+    return this.fetch('/workhub/containers', this.json('POST', data))
   }
 
-  async getContainer(containerNumber: string): Promise<ApiResponse<Container>> {
-    return this.fetch(`/workhub/containers/${encodeURIComponent(containerNumber)}`)
+  async moveContainer(containerNumber: string, data: ContainerMoveRequest): Promise<ApiResponse<MoveResponse>> {
+    return this.fetch(this.containerPath(containerNumber, '/move'), this.json('POST', data))
   }
 
-  async createContainer(data: ContainerCreateRequest): Promise<ApiResponse<Container>> {
-    return this.fetch('/workhub/containers', {
-      method: 'POST',
-      body: JSON.stringify(data),
-    })
+  async patchContainer(containerNumber: string, data: ContainerPatchRequest): Promise<ApiResponse<Container>> {
+    return this.fetch(this.containerPath(containerNumber), this.json('PATCH', data))
   }
 
-  async updateContainer(containerNumber: string, data: ContainerUpdateRequest): Promise<ApiResponse<Container>> {
-    const url = `/workhub/containers/${encodeURIComponent(containerNumber)}`
-    console.log('[DEBUG] WorkHubAPI.updateContainer - URL:', `${API_CONFIG.apiUrl}${url}`)
-    console.log('[DEBUG] WorkHubAPI.updateContainer - Method: PUT, Body:', data)
-    const response = await this.fetch<ApiResponse<Container>>(url, {
-      method: 'PUT',
-      body: JSON.stringify(data),
-    })
-    console.log('[DEBUG] WorkHubAPI.updateContainer - Response:', response)
-    return response
+  async exitContainer(containerNumber: string, data: ContainerExitRequest): Promise<ApiResponse<ExitResponse>> {
+    return this.fetch(this.containerPath(containerNumber, '/exit'), this.json('POST', data))
   }
 
-  async deleteContainer(containerNumber: string): Promise<ApiResponse<null>> {
-    return this.fetch(`/workhub/containers/${encodeURIComponent(containerNumber)}`, {
-      method: 'DELETE',
-    })
+  async getHistory(containerNumber: string, limit = 50): Promise<ApiResponse<Movement[]>> {
+    return this.fetch(this.containerPath(containerNumber, `/history?limit=${limit}`))
+  }
+
+  /** Where the given containers are, across all yards. Missing keys = not in any yard. */
+  async lookupPositions(containerNumbers: string[]): Promise<ApiResponse<Record<string, PositionInfo>>> {
+    return this.fetch('/workhub/containers/lookup-positions', this.json('POST', containerNumbers))
   }
 
   // === SEARCH ===
 
-  async searchUnits(query: string, limit = 20): Promise<ApiResponse<UnitSearchResult[]>> {
+  /** Registry search (Valkey); the backend returns a bare list or an ApiResponse depending on version. */
+  async searchUnits(query: string, limit = 20): Promise<ApiResponse<UnitSearchResult[]> | UnitSearchResult[]> {
     return this.fetch(`/units/search?q=${encodeURIComponent(query)}&limit=${limit}`)
   }
 }

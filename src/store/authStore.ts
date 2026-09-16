@@ -1,7 +1,8 @@
 import { create } from 'zustand'
-import { login, logout, refreshAccessToken, getStoredAuth, clearStoredAuth } from '../api/authApi'
+import { login, logout, getStoredAuth, clearStoredAuth } from '../api/authApi'
 import { workHubAPI } from '../api/WorkHubAPI'
-import { API_CONFIG } from '../api/config'
+import { canWrite, isAdmin } from '../constants/roles'
+import { logger } from '../utils/logger'
 import type { User, TokenData } from '../types'
 
 interface AuthStore {
@@ -10,55 +11,48 @@ interface AuthStore {
   user: User | null
   tokenData: TokenData | null
   error: string | null
+  /** Derived from the user's roles: may enter/move/edit/exit containers. */
+  canWrite: boolean
+  /** Derived from the user's roles: may manage yards and blocks. */
+  isAdmin: boolean
 
   login: (username: string, password: string) => Promise<void>
   logout: () => Promise<void>
-  initializeAuth: () => void
+  initializeAuth: () => Promise<void>
   clearError: () => void
 }
 
+function permissionsOf(user: User | null) {
+  return { canWrite: canWrite(user?.roles), isAdmin: isAdmin(user?.roles) }
+}
+
+/**
+ * Auth state. Token refresh is NOT scheduled here: the API client refreshes lazily on the
+ * first request that finds the token close to expiry and reports back via session callbacks.
+ */
 export const useAuthStore = create<AuthStore>((set, get) => {
-  let refreshInterval: ReturnType<typeof setInterval> | null = null
-
-  const startTokenRefresh = () => {
-    if (refreshInterval) {
-      clearInterval(refreshInterval)
-    }
-
-    // Check token every 30 seconds
-    refreshInterval = setInterval(async () => {
-      const { tokenData, isAuthenticated } = get()
-      if (!isAuthenticated || !tokenData?.refreshToken) {
-        return
-      }
-
-      // Refresh if token expires within 60 seconds
-      if (Date.now() > tokenData.tokenExpiry - API_CONFIG.tokenRefreshBuffer) {
-        try {
-          const result = await refreshAccessToken(tokenData.refreshToken)
-          set({ tokenData: result.tokenData, user: result.user })
-          workHubAPI.setTokenData(result.tokenData)
-        } catch {
-          // Session expired
-          set({
-            isAuthenticated: false,
-            user: null,
-            tokenData: null,
-            error: 'Sessione scaduta',
-          })
-          workHubAPI.setTokenData(null)
-          clearStoredAuth()
-        }
-      }
-    }, 30000)
+  const clearSession = (error: string | null) => {
+    workHubAPI.setTokenData(null)
+    clearStoredAuth()
+    set({
+      isAuthenticated: false,
+      isLoading: false,
+      user: null,
+      tokenData: null,
+      error,
+      ...permissionsOf(null),
+    })
   }
 
-  const stopTokenRefresh = () => {
-    if (refreshInterval) {
-      clearInterval(refreshInterval)
-      refreshInterval = null
-    }
-  }
+  workHubAPI.setSessionCallbacks({
+    onTokenRefreshed: (tokenData, user) => set({ tokenData, user, ...permissionsOf(user) }),
+    onSessionExpired: (reason) => {
+      if (get().isAuthenticated) {
+        logger.warn('Sessione terminata:', reason)
+        clearSession(reason)
+      }
+    },
+  })
 
   return {
     isAuthenticated: false,
@@ -66,8 +60,10 @@ export const useAuthStore = create<AuthStore>((set, get) => {
     user: null,
     tokenData: null,
     error: null,
+    canWrite: false,
+    isAdmin: false,
 
-    login: async (username: string, password: string) => {
+    login: async (username, password) => {
       set({ isLoading: true, error: null })
       try {
         const { tokenData, user } = await login(username, password)
@@ -78,8 +74,8 @@ export const useAuthStore = create<AuthStore>((set, get) => {
           user,
           tokenData,
           error: null,
+          ...permissionsOf(user),
         })
-        startTokenRefresh()
       } catch (err) {
         set({
           isLoading: false,
@@ -91,38 +87,39 @@ export const useAuthStore = create<AuthStore>((set, get) => {
 
     logout: async () => {
       const { tokenData } = get()
-      stopTokenRefresh()
       if (tokenData?.refreshToken) {
         await logout(tokenData.refreshToken)
       }
-      workHubAPI.setTokenData(null)
-      set({
-        isAuthenticated: false,
-        user: null,
-        tokenData: null,
-        error: null,
-      })
+      clearSession(null)
     },
 
-    initializeAuth: () => {
+    /**
+     * Restores a persisted session. If the access token is stale the API client refreshes it
+     * now, so the app never shows the yard with a dead session.
+     */
+    initializeAuth: async () => {
       const stored = getStoredAuth()
-      if (stored) {
-        const { tokenData, user } = stored
-        // Check if token is still valid (or can be refreshed)
-        if (Date.now() < tokenData.tokenExpiry + 30 * 60 * 1000) {
-          // Token or refresh token still valid
-          workHubAPI.setTokenData(tokenData)
-          set({
-            isAuthenticated: true,
-            isLoading: false,
-            user,
-            tokenData,
-          })
-          startTokenRefresh()
-          return
-        }
+      if (!stored) {
+        set({ isLoading: false })
+        return
       }
-      set({ isLoading: false })
+
+      workHubAPI.setTokenData(stored.tokenData)
+      try {
+        await workHubAPI.ensureValidToken()
+        const user = get().user ?? stored.user
+        set({
+          isAuthenticated: true,
+          isLoading: false,
+          user,
+          tokenData: workHubAPI.getTokenData() ?? stored.tokenData,
+          error: null,
+          ...permissionsOf(user),
+        })
+      } catch (err) {
+        logger.debug('Sessione salvata non ripristinabile', err)
+        clearSession(null)
+      }
     },
 
     clearError: () => set({ error: null }),
