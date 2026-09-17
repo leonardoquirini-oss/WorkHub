@@ -5,6 +5,7 @@ import { MapView2D } from '../2d/MapView2D'
 import { ContainerList } from '../ui/ContainerList'
 import { Toolbar } from '../ui/Toolbar'
 import { ContainerPanel } from '../ui/ContainerPanel'
+import { ContainerContextMenu } from '../ui/ContainerContextMenu'
 import { YardStats } from '../ui/YardStats'
 import { ControlPanel } from '../ui/ControlPanel'
 import { StatusBanners } from '../ui/StatusBanners'
@@ -33,6 +34,7 @@ export function AppLayout() {
         <Toolbar />
         <StatusBanners />
         <ContainerPanel />
+        <ContainerContextMenu />
         {viewMode === '3d' && (
           <>
             <YardStats />

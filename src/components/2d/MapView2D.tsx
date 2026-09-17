@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useMemo, type MouseEvent as ReactMouseEvent } from 'react'
 import { useYardStore } from '../../store/yardStore'
 import { useUIStore } from '../../store/uiStore'
 import { usePlacePending } from '../../hooks/usePlacePending'
@@ -50,7 +50,7 @@ function fillOf(top: PlacedContainer | null, selected: string | null): string {
 /** Top-down SVG map of the yard: blocks, bays × rows, top container and stack height per column. */
 export function MapView2D() {
   const { yards, selectedYardId, containers, blocks } = useYardStore()
-  const { selectedContainerNumber, toggleSelect, showAreas, pulseNumber } = useUIStore()
+  const { selectedContainerNumber, toggleSelect, showAreas, pulseNumber, openContextMenu } = useUIStore()
   const { pendingEnter, placeAt } = usePlacePending()
   const yard = yards.find((y) => y.id_yard === selectedYardId)
 
@@ -72,6 +72,13 @@ export function MapView2D() {
       return
     }
     if (cell.top) toggleSelect(cell.top.container_number)
+  }
+
+  /** Click destro sulla colonna: menu di riordino sul container in cima (il solo visibile in 2D). */
+  const onCellContextMenu = (cell: Cell, e: ReactMouseEvent) => {
+    e.preventDefault()
+    if (pendingEnter || !cell.top) return
+    openContextMenu({ containerNumber: cell.top.container_number, x: e.clientX, y: e.clientY })
   }
 
   const pendingSpan = pendingEnter ? baySpanOf(pendingEnter.container_type) : 1
@@ -110,7 +117,12 @@ export function MapView2D() {
             canPlace(pendingEnter, { id_block: cell.block.id_block, bay: cell.bay, row_no: cell.row }, blocks, containers).ok
           const isPulse = cell.top?.container_number === pulseNumber
           return (
-            <g key={cell.key} onClick={() => onCellClick(cell)} className={cell.top || placeable ? 'cursor-pointer' : ''}>
+            <g
+              key={cell.key}
+              onClick={() => onCellClick(cell)}
+              onContextMenu={(e) => onCellContextMenu(cell, e)}
+              className={cell.top || placeable ? 'cursor-pointer' : ''}
+            >
               <rect
                 x={cell.x}
                 y={cell.y}

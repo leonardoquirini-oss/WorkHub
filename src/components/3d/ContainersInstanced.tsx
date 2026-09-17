@@ -17,6 +17,8 @@ interface ContainersInstancedProps {
   onPointerUp: () => void
   /** Click on a container: consumed here so the ground plane behind does not deselect it. */
   onClick: (e: ThreeEvent<MouseEvent>) => void
+  /** Right click on a container: opens the column context menu. */
+  onContextMenu: (container: Container, e: ThreeEvent<MouseEvent>) => void
 }
 
 const tmpMatrix = new THREE.Matrix4()
@@ -43,10 +45,11 @@ interface TypeInstancesProps {
   onPointerDown: (container: Container, e: ThreeEvent<PointerEvent>) => void
   onPointerUp: () => void
   onClick: (e: ThreeEvent<MouseEvent>) => void
+  onContextMenu: (container: Container, e: ThreeEvent<MouseEvent>) => void
 }
 
 /** One InstancedMesh per container type (same box geometry, per-instance transform + colour). */
-function TypeInstances({ type, list, all, blocksById, selectedNumber, hiddenNumber, onPointerDown, onPointerUp, onClick }: TypeInstancesProps) {
+function TypeInstances({ type, list, all, blocksById, selectedNumber, hiddenNumber, onPointerDown, onPointerUp, onClick, onContextMenu }: TypeInstancesProps) {
   const ref = useRef<THREE.InstancedMesh>(null)
   const invalidate = useThree((s) => s.invalidate)
   const dims = CONTAINER_DIMENSIONS[type]
@@ -90,6 +93,10 @@ function TypeInstances({ type, list, all, blocksById, selectedNumber, hiddenNumb
       }}
       onPointerUp={() => onPointerUp()}
       onClick={onClick}
+      onContextMenu={(e) => {
+        if (e.instanceId === undefined) return
+        onContextMenu(list[e.instanceId], e)
+      }}
       onPointerOver={(e) => {
         e.stopPropagation()
         document.body.style.cursor = 'pointer'
@@ -104,7 +111,7 @@ function TypeInstances({ type, list, all, blocksById, selectedNumber, hiddenNumb
   )
 }
 
-export function ContainersInstanced({ containers, blocks, selectedNumber, hiddenNumber, onPointerDown, onPointerUp, onClick }: ContainersInstancedProps) {
+export function ContainersInstanced({ containers, blocks, selectedNumber, hiddenNumber, onPointerDown, onPointerUp, onClick, onContextMenu }: ContainersInstancedProps) {
   const blocksById = useMemo(() => new Map(blocks.map((b) => [b.id_block, b])), [blocks])
 
   const byType = useMemo(() => {
@@ -133,6 +140,7 @@ export function ContainersInstanced({ containers, blocks, selectedNumber, hidden
           onPointerDown={onPointerDown}
           onPointerUp={onPointerUp}
           onClick={onClick}
+          onContextMenu={onContextMenu}
         />
       ))}
     </group>

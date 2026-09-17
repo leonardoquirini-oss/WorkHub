@@ -3,7 +3,7 @@ import { workHubAPI, ApiError } from '../api/WorkHubAPI'
 import { API_CONFIG, STORAGE_KEYS } from '../api/config'
 import { logger } from '../utils/logger'
 import { notify } from './notificationStore'
-import { baySpanOf, canPlace, cascadePreview, isPlaced, labelOf, posFromTop } from '../utils/slotLayout'
+import { baySpanOf, canPlace, cascadePreview, isPlaced, labelOf, posFromTop, restackPreview } from '../utils/slotLayout'
 import type {
   Block,
   Container,
@@ -41,6 +41,7 @@ interface YardStore {
 
   enterContainer: (data: Omit<ContainerEnterRequest, keyof SlotRef>, slot: SlotRef) => Promise<Container | null>
   moveContainer: (containerNumber: string, slot: SlotRef) => Promise<boolean>
+  restackContainer: (containerNumber: string, toTier: number) => Promise<boolean>
   patchContainer: (containerNumber: string, patch: Omit<ContainerPatchRequest, 'version'>) => Promise<Container | null>
   exitContainer: (containerNumber: string, note?: string) => Promise<boolean>
   applyYardEvent: (event: YardEvent) => void
@@ -220,6 +221,30 @@ export const useYardStore = create<YardStore>((set, get) => {
         return true
       } catch (err) {
         await recover(before, err, 'Spostamento fallito')
+        return false
+      }
+    },
+
+    restackContainer: async (containerNumber, toTier) => {
+      const { containers } = get()
+      const current = containers.find((c) => c.container_number === containerNumber)
+      if (!current || !isPlaced(current)) return false
+      const preview = restackPreview(containers, current, toTier)
+      if (preview.length === 0) {
+        notify.warning('Riordino non valido per questa pila')
+        return false
+      }
+      const before = containers
+      set({ containers: withPosFromTop(upsertAll(containers, preview)) })
+      try {
+        const { data } = await workHubAPI.restackContainer(containerNumber, { tier: toTier, version: current.version })
+        set((s) => ({
+          containers: withPosFromTop(upsertAll(s.containers, [data.moved, ...data.cascaded])),
+          revision: Math.max(s.revision, data.revision),
+        }))
+        return true
+      } catch (err) {
+        await recover(before, err, 'Riordino fallito')
         return false
       }
     },

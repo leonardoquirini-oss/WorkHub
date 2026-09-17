@@ -7,8 +7,10 @@ import {
   columnBaseHeight,
   findSlotAt,
   footprintLength,
+  columnNeighbor,
   labelOf,
   posFromTop,
+  restackPreview,
   slotBox,
   slotOrigin,
   topTier,
@@ -175,5 +177,50 @@ describe('stacking rules', () => {
 
   it('labels are zero-padded', () => {
     expect(labelOf('PZ1', 'A', 3, 12)).toBe('PZ1-A-03-12')
+  })
+})
+
+describe('restack inside a column', () => {
+  const column = [ctr('R1', '40', 1, 1, 1), ctr('R2', '40', 1, 1, 2), ctr('R3', '40', 1, 1, 3)]
+  const other = ctr('X1', '40', 3, 1, 1)
+  const containers = [...column, other]
+
+  it('columnNeighbor finds the container right below and right above', () => {
+    expect(columnNeighbor(containers, column[1] as never, -1)?.container_number).toBe('R1')
+    expect(columnNeighbor(containers, column[1] as never, 1)?.container_number).toBe('R3')
+    expect(columnNeighbor(containers, column[0] as never, -1)).toBeNull()
+    expect(columnNeighbor(containers, column[2] as never, 1)).toBeNull()
+  })
+
+  it('swaps with the container below (one tier down)', () => {
+    const updated = restackPreview(containers, column[1] as never, 1)
+    expect(updated.map((c) => [c.container_number, c.tier])).toEqual([
+      ['R2', 1],
+      ['R1', 2],
+    ])
+  })
+
+  it('swaps with the container above (one tier up)', () => {
+    const updated = restackPreview(containers, column[1] as never, 3)
+    expect(updated.map((c) => [c.container_number, c.tier])).toEqual([
+      ['R2', 3],
+      ['R3', 2],
+    ])
+  })
+
+  it('lifts to the top of the stack and shifts the others down', () => {
+    const updated = restackPreview(containers, column[0] as never, 3)
+    expect(updated.map((c) => [c.container_number, c.tier])).toEqual([
+      ['R1', 3],
+      ['R2', 1],
+      ['R3', 2],
+    ])
+  })
+
+  it('ignores other columns and rejects targets outside the stack', () => {
+    expect(restackPreview(containers, column[0] as never, 1)).toEqual([])
+    expect(restackPreview(containers, column[0] as never, 4)).toEqual([])
+    expect(restackPreview(containers, column[0] as never, 0)).toEqual([])
+    expect(restackPreview(containers, other as never, 1)).toEqual([])
   })
 })

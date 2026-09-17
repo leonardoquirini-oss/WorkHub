@@ -191,6 +191,32 @@ export function cascadePreview(containers: Container[], source: PlacedContainer)
     .map((c) => ({ ...c, tier: c.tier - 1 }))
 }
 
+/**
+ * Anteprima del riordino dentro la colonna: il soggetto va a `toTier` e i container fra la
+ * posizione di partenza e quella di arrivo scalano di un livello nel verso opposto (specchio di
+ * `YardSlotService.restack`). Ritorna copie aggiornate (soggetto per primo), o `[]` se non valido.
+ */
+export function restackPreview(containers: Container[], subject: PlacedContainer, toTier: number): Container[] {
+  const column = columnOf(containers, subject.id_block, subject.row_no, subject.bay)
+  const top = column.reduce((max, c) => Math.max(max, c.tier), 0)
+  if (toTier < 1 || toTier > top || toTier === subject.tier) return []
+
+  const delta = toTier < subject.tier ? 1 : -1
+  const shifted = column
+    .filter((c) => c.container_number !== subject.container_number)
+    .filter((c) => (delta === 1 ? c.tier >= toTier && c.tier < subject.tier : c.tier > subject.tier && c.tier <= toTier))
+    .map((c) => ({ ...c, tier: c.tier + delta }))
+  return [{ ...subject, tier: toTier }, ...shifted]
+}
+
+/** Container immediatamente sotto (`-1`) o sopra (`+1`) il soggetto nella sua colonna. */
+export function columnNeighbor(containers: Container[], subject: PlacedContainer, offset: 1 | -1): PlacedContainer | null {
+  return (
+    columnOf(containers, subject.id_block, subject.row_no, subject.bay).find((c) => c.tier === subject.tier + offset) ??
+    null
+  )
+}
+
 const pad2 = (n: number) => String(n).padStart(2, '0')
 
 export function labelOf(yardCode: string, blockCode: string, bay: number, row: number): string {

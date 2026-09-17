@@ -21,7 +21,7 @@ const CLICK_SLOP_PX = 6
 function Scene({ highQuality }: { highQuality: boolean }) {
   const { yards, selectedYardId, containers, blocks } = useYardStore()
   const { showGrid, showAreas, selectContainer, selectedContainerNumber, dragTarget, pulseNumber } = useUIStore()
-  const { dragging, onContainerPointerDown, onPointerMove, onPointerUp } = useSlotDrag()
+  const { dragging, onContainerPointerDown, onContainerContextMenu, onPointerMove, onPointerUp } = useSlotDrag()
   const { pendingEnter, placeAt } = usePlacePending()
 
   const yard = yards.find((y) => y.id_yard === selectedYardId)
@@ -109,6 +109,7 @@ function Scene({ highQuality }: { highQuality: boolean }) {
         onPointerDown={onContainerPointerDown}
         onPointerUp={onPointerUp}
         onClick={handleContainerClick}
+        onContextMenu={onContainerContextMenu}
       />
 
       <ContainerLabels containers={containers} blocks={blocks} selectedNumber={selectedContainerNumber} pulseNumber={pulseNumber} />
@@ -137,7 +138,7 @@ export function Yard3D() {
   }
 
   return (
-    <div className="w-full h-full relative touch-none select-none">
+    <div className="w-full h-full relative touch-none select-none" onContextMenu={(e) => e.preventDefault()}>
       {isLoadingContainers && (
         <div className="absolute inset-0 bg-slate-900/50 flex items-center justify-center z-10 pointer-events-none">
           <div className="text-white">Caricamento piazzale...</div>

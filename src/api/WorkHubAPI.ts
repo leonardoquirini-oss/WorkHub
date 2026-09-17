@@ -8,6 +8,7 @@ import type {
   ContainerExitRequest,
   ContainerMoveRequest,
   ContainerPatchRequest,
+  ContainerRestackRequest,
   ExitResponse,
   MoveResponse,
   Movement,
@@ -193,6 +194,11 @@ class WorkHubAPI {
 
   async moveContainer(containerNumber: string, data: ContainerMoveRequest): Promise<ApiResponse<MoveResponse>> {
     return this.fetch(this.containerPath(containerNumber, '/move'), this.json('POST', data))
+  }
+
+  /** Riordina il container dentro la sua colonna (scambio con il vicino, risalita in cima). */
+  async restackContainer(containerNumber: string, data: ContainerRestackRequest): Promise<ApiResponse<MoveResponse>> {
+    return this.fetch(this.containerPath(containerNumber, '/restack'), this.json('POST', data))
   }
 
   async patchContainer(containerNumber: string, data: ContainerPatchRequest): Promise<ApiResponse<Container>> {

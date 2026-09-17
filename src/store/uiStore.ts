@@ -24,6 +24,13 @@ export interface DragTarget extends SlotRef {
   reason?: string
 }
 
+/** Container the context menu is open on, with the screen point (px) where it was requested. */
+export interface ContextMenuTarget {
+  containerNumber: string
+  x: number
+  y: number
+}
+
 /** Camera fly-to request; `nonce` forces the effect to re-run for the same point. */
 export interface FlyToRequest {
   x: number
@@ -50,6 +57,7 @@ interface UIStore {
   viewMode: ViewMode
 
   selectedContainerNumber: string | null
+  contextMenu: ContextMenuTarget | null
 
   isDragging: boolean
   dragTarget: DragTarget | null
@@ -72,6 +80,8 @@ interface UIStore {
   setToolbarPos: (pos: ToolbarPos | null) => void
   selectContainer: (containerNumber: string | null) => void
   toggleSelect: (containerNumber: string) => void
+  openContextMenu: (target: ContextMenuTarget) => void
+  closeContextMenu: () => void
   setDragging: (isDragging: boolean) => void
   setDragTarget: (target: DragTarget | null) => void
   setCameraPreset: (preset: CameraPreset) => void
@@ -127,6 +137,7 @@ export const useUIStore = create<UIStore>((set, get) => {
     viewMode: '3d',
     toolbarPos: null,
     selectedContainerNumber: null,
+    contextMenu: null,
     isDragging: false,
     dragTarget: null,
     cameraPreset: 'perspective',
@@ -163,6 +174,9 @@ export const useUIStore = create<UIStore>((set, get) => {
         selectedContainerNumber: s.selectedContainerNumber === containerNumber ? null : containerNumber,
         showPanel: true,
       })),
+
+    openContextMenu: (target) => set({ contextMenu: target, selectedContainerNumber: target.containerNumber }),
+    closeContextMenu: () => set({ contextMenu: null }),
 
     setDragging: (isDragging) => set({ isDragging }),
     setDragTarget: (target) => {

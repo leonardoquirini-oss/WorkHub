@@ -72,6 +72,14 @@ export interface ContainerMoveRequest extends SlotRef {
   note?: string | null
 }
 
+/** `POST /api/workhub/containers/{n}/restack` — riordino dentro la stessa colonna. */
+export interface ContainerRestackRequest {
+  /** Livello di destinazione nella colonna (1 = terra); deve essere dentro la pila esistente. */
+  tier: number
+  version: number
+  note?: string | null
+}
+
 /** `PATCH /api/workhub/containers/{n}` */
 export interface ContainerPatchRequest {
   status?: ContainerStatus

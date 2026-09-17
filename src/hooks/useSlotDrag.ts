@@ -14,6 +14,8 @@ export const LONG_PRESS_MS = 300
 const TAP_SLOP_PX = 10
 /** Movement (px) above which the gesture is a camera orbit, not a tap on the container. */
 const ORBIT_SLOP_PX = 14
+/** Two taps on the same container within this window (ms) open the context menu. */
+export const DOUBLE_TAP_MS = 350
 
 const GROUND_PLANE = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0)
 const hitPoint = new THREE.Vector3()
@@ -35,15 +37,19 @@ interface PendingPress {
  * A short press that never becomes a drag is a tap: it selects the container (and opens the
  * details panel). The press is kept until pointerup even when the long-press timer is
  * cancelled by a small movement, so an imprecise click still selects.
+ *
+ * A second tap on the same container within `DOUBLE_TAP_MS` — or a right click — opens the
+ * context menu (riordino della colonna): il tablet non ha il tasto destro.
  */
 export function useSlotDrag() {
   const pressRef = useRef<PendingPress | null>(null)
   const draggingRef = useRef<Container | null>(null)
+  const lastTapRef = useRef<{ number: string; at: number } | null>(null)
   const [dragging, setDraggingState] = useState<Container | null>(null)
 
   const canWrite = useAuthStore((s) => s.canWrite)
   const { blocks, containers, moveContainer } = useYardStore()
-  const { setDragging, setDragTarget, selectContainer } = useUIStore()
+  const { setDragging, setDragTarget, selectContainer, openContextMenu, closeContextMenu } = useUIStore()
 
   const clearPress = useCallback(() => {
     const press = pressRef.current
@@ -61,10 +67,27 @@ export function useSlotDrag() {
     [setDragging, setDragTarget]
   )
 
+  const onContainerContextMenu = useCallback(
+    (container: Container, e: ThreeEvent<MouseEvent>) => {
+      e.stopPropagation()
+      e.nativeEvent.preventDefault()
+      clearPress()
+      if (!canWrite) return
+      lastTapRef.current = null
+      openContextMenu({
+        containerNumber: container.container_number,
+        x: e.nativeEvent.clientX,
+        y: e.nativeEvent.clientY,
+      })
+    },
+    [canWrite, clearPress, openContextMenu]
+  )
+
   const onContainerPointerDown = useCallback(
     (container: Container, e: ThreeEvent<PointerEvent>) => {
       e.stopPropagation()
       clearPress()
+      if (e.nativeEvent.button !== 0) return // tasto destro/centrale: nessuna presa
       const timer = canWrite
         ? setTimeout(() => {
             if (pressRef.current) pressRef.current.timer = null
@@ -122,20 +145,39 @@ export function useSlotDrag() {
   }, [moveContainer, setDragging_])
 
   /**
+   * Closes a pending press: a tap selects the container, a second tap on the same container
+   * within `DOUBLE_TAP_MS` opens the context menu. Returns true when a press was consumed.
+   */
+  const consumeTap = useCallback(() => {
+    const press = pressRef.current
+    if (!press) return false
+    clearPress()
+    // While placing a container the tap chooses the slot: it must not steal the selection.
+    const placing = useUIStore.getState().pendingEnter !== null
+    if (placing || press.travel > ORBIT_SLOP_PX) return true
+
+    const number = press.container.container_number
+    const previous = lastTapRef.current
+    const now = Date.now()
+    selectContainer(number)
+    if (canWrite && previous && previous.number === number && now - previous.at <= DOUBLE_TAP_MS) {
+      lastTapRef.current = null
+      openContextMenu({ containerNumber: number, x: press.x, y: press.y })
+    } else {
+      lastTapRef.current = { number, at: now }
+      closeContextMenu()
+    }
+    return true
+  }, [canWrite, clearPress, closeContextMenu, openContextMenu, selectContainer])
+
+  /**
    * Ends the gesture. Bound to both the ground plane and the containers, because the pointer
    * can be released over either; whichever fires first consumes the pending press.
    */
   const onPointerUp = useCallback(() => {
-    const press = pressRef.current
-    if (press) {
-      clearPress()
-      // While placing a container the tap chooses the slot: it must not steal the selection.
-      const placing = useUIStore.getState().pendingEnter !== null
-      if (!placing && press.travel <= ORBIT_SLOP_PX) selectContainer(press.container.container_number)
-      return
-    }
+    if (consumeTap()) return
     void finishDrag()
-  }, [clearPress, finishDrag, selectContainer])
+  }, [consumeTap, finishDrag])
 
   // Releasing outside the canvas must still end the drag.
   useEffect(() => {
@@ -151,22 +193,16 @@ export function useSlotDrag() {
 
   // A press that never reaches pointerup on the canvas (e.g. released outside) must not leak.
   useEffect(() => {
-    const cancel = () => {
-      const press = pressRef.current
-      if (!press) return
-      clearPress()
-      const placing = useUIStore.getState().pendingEnter !== null
-      if (!placing && press.travel <= ORBIT_SLOP_PX) selectContainer(press.container.container_number)
-    }
+    const cancel = () => void consumeTap()
     window.addEventListener('pointerup', cancel)
     window.addEventListener('pointercancel', cancel)
     return () => {
       window.removeEventListener('pointerup', cancel)
       window.removeEventListener('pointercancel', cancel)
     }
-  }, [clearPress, selectContainer])
+  }, [consumeTap])
 
   useEffect(() => () => clearPress(), [clearPress])
 
-  return { dragging, onContainerPointerDown, onPointerMove, onPointerUp }
+  return { dragging, onContainerPointerDown, onContainerContextMenu, onPointerMove, onPointerUp }
 }

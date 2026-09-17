@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { useYardStore } from '../yardStore'
-import { workHubAPI } from '../../api/WorkHubAPI'
+import { workHubAPI, ApiError } from '../../api/WorkHubAPI'
 import type { Container, YardEvent } from '../../types'
 
 function ctr(number: string, tier: number, version = 1): Container {
@@ -62,6 +62,58 @@ describe('yardStore.applyYardEvent', () => {
 
     useYardStore.getState().applyYardEvent({ type: 'LAYOUT', id_yard: 1, revision: 13 })
     await vi.waitFor(() => expect(spy).toHaveBeenCalledTimes(2))
+    spy.mockRestore()
+  })
+})
+
+describe('yardStore.restackContainer', () => {
+  beforeEach(() => {
+    useYardStore.setState({ selectedYardId: 1, revision: 10, containers: [ctr('A', 1), ctr('B', 2)], blocks: [] })
+  })
+
+  it('swaps the two tiers optimistically and confirms with the server response', async () => {
+    const spy = vi.spyOn(workHubAPI, 'restackContainer').mockResolvedValue({
+      success: true,
+      data: { moved: ctr('A', 2, 2), cascaded: [ctr('B', 1, 2)], revision: 11 },
+    })
+
+    const ok = await useYardStore.getState().restackContainer('A', 2)
+
+    expect(ok).toBe(true)
+    expect(spy).toHaveBeenCalledWith('A', { tier: 2, version: 1 })
+    const byNumber = new Map(useYardStore.getState().containers.map((c) => [c.container_number, c]))
+    expect(byNumber.get('A')?.tier).toBe(2)
+    expect(byNumber.get('A')?.pos_from_top).toBe(1)
+    expect(byNumber.get('B')?.tier).toBe(1)
+    expect(useYardStore.getState().revision).toBe(11)
+    spy.mockRestore()
+  })
+
+  it('rolls back and reloads the snapshot on a 409', async () => {
+    const spy = vi.spyOn(workHubAPI, 'restackContainer').mockRejectedValue(new ApiError(409, 'Conflitto'))
+    const snapshot = vi.spyOn(workHubAPI, 'getSnapshot').mockResolvedValue({
+      success: true,
+      data: {
+        revision: 12,
+        yard: { id_yard: 1, id_site: 1, code: 'PZ1', name: 'Y', width: 10, length: 10, max_stack_height: 5, is_active: true, areas: [], blocks: [] },
+        containers: [ctr('A', 1), ctr('B', 2)],
+      },
+    })
+
+    const ok = await useYardStore.getState().restackContainer('A', 2)
+
+    expect(ok).toBe(false)
+    expect(snapshot).toHaveBeenCalledTimes(1)
+    expect(useYardStore.getState().containers.find((c) => c.container_number === 'A')?.tier).toBe(1)
+    spy.mockRestore()
+    snapshot.mockRestore()
+  })
+
+  it('refuses a tier outside the stack without calling the API', async () => {
+    const spy = vi.spyOn(workHubAPI, 'restackContainer')
+    expect(await useYardStore.getState().restackContainer('A', 5)).toBe(false)
+    expect(await useYardStore.getState().restackContainer('A', 1)).toBe(false)
+    expect(spy).not.toHaveBeenCalled()
     spy.mockRestore()
   })
 })

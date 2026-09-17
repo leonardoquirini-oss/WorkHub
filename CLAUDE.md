@@ -22,9 +22,9 @@ constants/  roles.ts (WRITE = cd,logs,resources; ADMIN = cd), containerSizes.ts,
 services/   yardEvents.ts (SSE, backoff, polling, pausa tab nascosto)
 store/      yardStore.ts, uiStore.ts, authStore.ts, notificationStore.ts
 utils/      slotLayout.ts (regole slot: span 2 sul bay dispari, colonna omogenea, tier=top+1, cascadePreview), logger.ts, registry.ts, format.ts
-hooks/      useSlotDrag.ts (tap = seleziona, long-press 300 ms = presa), useYardEvents.ts, usePlacePending.ts, useMediaQuery.ts
+hooks/      useSlotDrag.ts (tap = seleziona, long-press 300 ms = presa, doppio tap/destro = menu colonna), useYardEvents.ts, usePlacePending.ts, useMediaQuery.ts
 components/ 3d/ (Yard3D, Block3D, ContainersInstanced, SlotHighlight, ContainerLabels, PulseMarker, Controls, Grid3D, YardAreas3D)
-            2d/MapView2D.tsx · ui/ (Toolbar, ContainerPanel, ContainerEditForm, ContainerHistory, ContainerList, FindContainer, AddContainerModal, StatusBanners, ConfirmDialog, ErrorBoundary, Toast) · layout/
+            2d/MapView2D.tsx · ui/ (Toolbar, ContainerPanel, ContainerEditForm, ContainerHistory, ContainerList, ContainerContextMenu, FindContainer, AddContainerModal, StatusBanners, ConfirmDialog, ErrorBoundary, Toast) · layout/
 types/      container.ts, yard.ts (Block, YardSnapshot, YardEvent), auth.ts
 ```
 
@@ -33,6 +33,7 @@ types/      container.ts, yard.ts (Block, YardSnapshot, YardEvent), auth.ts
 - Posizione = slot `id_block, bay, row_no, tier` (1 = terra). Label `PIAZZALE-BLOCCO-BAY-ROW`; "N° dall'alto" = `pos_from_top` (derivato dal server).
 - `20'` occupa 1 bay; `40/40HC/45HC` occupano 2 bay a partire da un bay **dispari**. Una colonna e' omogenea per ingombro.
 - Il client valida in locale (`slotLayout.canPlace`) solo per l'anteprima: la verita' e' il server. Ogni mutazione manda `version`; **409** → rollback + `loadSnapshot()`.
+- Riordino dentro la colonna (`POST /containers/{n}/restack`, `slotLayout.restackPreview`): scambio con il container sotto/sopra e risalita in cima; chi sta in mezzo scala di un livello. Fuori colonna si usa `/move`.
 - Spostamenti solo nello stesso sito; cambio sito = uscita + nuovo ingresso. La cascata (chi sta sopra scende) e' server-side: il client la applica dalla risposta/evento.
 - `position_x/y/z` del server sono cache: il rendering usa `slotLayout.slotToWorld`.
 
