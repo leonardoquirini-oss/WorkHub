@@ -3,7 +3,8 @@ import { useYardStore } from '../../store/yardStore'
 import { useUIStore } from '../../store/uiStore'
 import { usePlacePending } from '../../hooks/usePlacePending'
 import { CONTAINER_STATUS_COLORS } from '../../constants/containerSizes'
-import { SELECTED_CONTAINER_COLOR } from '../../constants/yardConfig'
+import { BRAND_LOGO_ASPECT, BRAND_LOGO_URL, hasBrandLogo } from '../../constants/branding'
+import { CONTAINER_NUMBER_COLOR, DEFAULT_CONTAINER_COLOR, SELECTED_CONTAINER_COLOR } from '../../constants/yardConfig'
 import { baySpanOf, blockBounds, canPlace, columnOf, slotOrigin } from '../../utils/slotLayout'
 import type { Block, Container, PlacedContainer } from '../../types'
 
@@ -44,7 +45,16 @@ function fillOf(top: PlacedContainer | null, selected: string | null): string {
   if (!top) return 'transparent'
   if (top.container_number === selected) return SELECTED_CONTAINER_COLOR
   if (top.status !== 'active') return CONTAINER_STATUS_COLORS[top.status]
-  return top.color || '#3b82f6'
+  return top.color || DEFAULT_CONTAINER_COLOR
+}
+
+/** Logo a sinistra del numero, dimensionato sulla cella; assente se non resta spazio per il numero. */
+function logoBoxOf(cell: Cell): { x: number; y: number; width: number; height: number } | null {
+  if (!cell.top || !hasBrandLogo(cell.top.container_number)) return null
+  const height = Math.min(cell.h * 0.62, (cell.w * 0.26) / BRAND_LOGO_ASPECT)
+  const width = height * BRAND_LOGO_ASPECT
+  if (cell.w - width < 2.6) return null
+  return { x: cell.x + 0.3, y: cell.y + (cell.h - height) / 2, width, height }
 }
 
 /** Top-down SVG map of the yard: blocks, bays × rows, top container and stack height per column. */
@@ -116,6 +126,7 @@ export function MapView2D() {
             pendingEnter && !cell.top && (pendingSpan === 1 || cell.bay % 2 === 1) &&
             canPlace(pendingEnter, { id_block: cell.block.id_block, bay: cell.bay, row_no: cell.row }, blocks, containers).ok
           const isPulse = cell.top?.container_number === pulseNumber
+          const logo = logoBoxOf(cell)
           return (
             <g
               key={cell.key}
@@ -135,8 +146,24 @@ export function MapView2D() {
               />
               {cell.top && (
                 <>
-                  <text x={cell.x + 0.3} y={cell.y + 1.55} fontSize={1.05} fill="#ffffff" fontFamily="monospace">
-                    {shortNumber(cell.top.container_number, cell.w)}
+                  {logo && (
+                    <image
+                      href={BRAND_LOGO_URL}
+                      x={logo.x}
+                      y={logo.y}
+                      width={logo.width}
+                      height={logo.height}
+                      preserveAspectRatio="xMidYMid meet"
+                    />
+                  )}
+                  <text
+                    x={cell.x + 0.3 + (logo ? logo.width + 0.25 : 0)}
+                    y={cell.y + 1.55}
+                    fontSize={1.05}
+                    fill={CONTAINER_NUMBER_COLOR}
+                    fontFamily="monospace"
+                  >
+                    {shortNumber(cell.top.container_number, cell.w - (logo ? logo.width + 0.25 : 0))}
                   </text>
                   {cell.count > 1 && (
                     <>

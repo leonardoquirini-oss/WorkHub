@@ -1,4 +1,5 @@
 import type { ContainerType, ContainerDimensions } from '../types'
+import { DEFAULT_CONTAINER_COLOR } from './yardConfig'
 
 // ISO Standard container dimensions in meters
 export const CONTAINER_DIMENSIONS: Record<ContainerType, ContainerDimensions> = {
@@ -50,6 +51,7 @@ export const CONTAINER_STATUS_COLORS: Record<string, string> = {
 }
 
 export const DEFAULT_CONTAINER_COLORS = [
+  DEFAULT_CONTAINER_COLOR, // Crema (default della cassa)
   '#3b82f6', // Blue
   '#ef4444', // Red
   '#22c55e', // Green

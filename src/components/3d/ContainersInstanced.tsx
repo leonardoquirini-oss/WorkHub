@@ -1,9 +1,10 @@
-import { useLayoutEffect, useMemo, useRef } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef } from 'react'
 import { useThree, type ThreeEvent } from '@react-three/fiber'
 import * as THREE from 'three'
 import { CONTAINER_DIMENSIONS, CONTAINER_STATUS_COLORS } from '../../constants/containerSizes'
-import { SELECTED_CONTAINER_COLOR } from '../../constants/yardConfig'
+import { DEFAULT_CONTAINER_COLOR, SELECTED_CONTAINER_COLOR } from '../../constants/yardConfig'
 import { columnBaseHeight, isPlaced, slotBox } from '../../utils/slotLayout'
+import { RIB_BUMP_SCALE, ribTexture } from '../../utils/ribTexture'
 import type { Block, Container, ContainerType, PlacedContainer } from '../../types'
 
 interface ContainersInstancedProps {
@@ -31,8 +32,8 @@ const ROT_0 = new THREE.Quaternion()
 
 function colorOf(c: Container, selected: boolean): string {
   if (selected) return SELECTED_CONTAINER_COLOR
-  if (c.status !== 'active') return CONTAINER_STATUS_COLORS[c.status] ?? '#3b82f6'
-  return c.color || '#3b82f6'
+  if (c.status !== 'active') return CONTAINER_STATUS_COLORS[c.status] ?? DEFAULT_CONTAINER_COLOR
+  return c.color || DEFAULT_CONTAINER_COLOR
 }
 
 interface TypeInstancesProps {
@@ -53,6 +54,10 @@ function TypeInstances({ type, list, all, blocksById, selectedNumber, hiddenNumb
   const ref = useRef<THREE.InstancedMesh>(null)
   const invalidate = useThree((s) => s.invalidate)
   const dims = CONTAINER_DIMENSIONS[type]
+
+  // Costolatura verticale della cassa: una costola ogni RIB_PITCH lungo la faccia.
+  const ribs = useMemo(() => ribTexture(dims.length), [dims.length])
+  useEffect(() => () => ribs.dispose(), [ribs])
 
   useLayoutEffect(() => {
     const mesh = ref.current
@@ -106,7 +111,7 @@ function TypeInstances({ type, list, all, blocksById, selectedNumber, hiddenNumb
       }}
     >
       <boxGeometry args={[dims.length, dims.height, dims.width]} />
-      <meshStandardMaterial roughness={0.75} metalness={0.15} />
+      <meshStandardMaterial map={ribs} bumpMap={ribs} bumpScale={RIB_BUMP_SCALE} roughness={0.75} metalness={0.15} />
     </instancedMesh>
   )
 }
