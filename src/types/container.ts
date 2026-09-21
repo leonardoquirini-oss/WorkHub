@@ -2,7 +2,7 @@ export type ContainerType = '20' | '30' | '40' | '40HC' | '45HC'
 
 export type ContainerStatus = 'active' | 'damaged' | 'maintenance'
 
-/** Block orientation cached on the container (0 = bays along X, 90 = bays along Z). */
+/** Block orientation cached on the container (0/180 = bays along X, 90/270 = bays along Z; 180/270 count from the opposite corner). */
 export type Rotation = 0 | 90 | 180 | 270
 
 export type BaySpan = 1 | 2
@@ -45,6 +45,16 @@ export interface Container {
   status: ContainerStatus
   version: number
   registry_match?: boolean | null
+  /**
+   * Riga del registro carico/scarico RCS che ha fatto uscire la merce: se valorizzata la cassa e'
+   * vuota e va portata fuori dal piazzale (vedi `utils/exitMark.ts`). Derivata dal backend, non
+   * modificabile dall'app.
+   */
+  id_exit_availability?: number | null
+  /** DDT dell'uscita, denormalizzato: il tablet non ha accesso al registro. */
+  exit_ddt_number?: string | null
+  /** Data di uscita della merce (ISO `YYYY-MM-DD`), non il momento della marcatura. */
+  exit_off_date?: string | null
   created_at?: string
   updated_at?: string | null
   updated_by?: string | null

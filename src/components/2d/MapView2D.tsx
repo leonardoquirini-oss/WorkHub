@@ -5,7 +5,9 @@ import { usePlacePending } from '../../hooks/usePlacePending'
 import { CONTAINER_STATUS_COLORS } from '../../constants/containerSizes'
 import { BRAND_LOGO_ASPECT, BRAND_LOGO_URL, hasBrandLogo } from '../../constants/branding'
 import { CONTAINER_NUMBER_COLOR, DEFAULT_CONTAINER_COLOR, SELECTED_CONTAINER_COLOR } from '../../constants/yardConfig'
-import { baySpanOf, blockBounds, canPlace, columnOf, slotOrigin } from '../../utils/slotLayout'
+import { baySpanOf, blockBounds, canPlace, columnOf, isRotated, slotOrigin } from '../../utils/slotLayout'
+import { CHECKER_SQUARE } from '../../utils/checkerTexture'
+import { isMarkedForExit } from '../../utils/exitMark'
 import type { Block, Container, PlacedContainer } from '../../types'
 
 interface Cell {
@@ -30,20 +32,25 @@ function cellsOf(block: Block, containers: Container[]): Cell[] {
       const column = columnOf(containers, block.id_block, row, bay)
       const top = column.length ? column[column.length - 1] : null
       if (top && top.bay_span === 2) coveredByPair.add(`${row}:${bay + 1}`)
-      const o = slotOrigin(block, bay, row)
       const span = top?.bay_span ?? 1
+      const o = slotOrigin(block, bay, row, span as 1 | 2)
       const along = span * block.bay_length + (span - 1) * block.gap
-      const w = block.orientation === 90 ? block.row_width : along
-      const h = block.orientation === 90 ? along : block.row_width
+      const w = isRotated(block.orientation) ? block.row_width : along
+      const h = isRotated(block.orientation) ? along : block.row_width
       cells.push({ key: `${block.id_block}:${row}:${bay}`, block, bay, row, x: o.x, y: o.z, w, h, top, count: column.length, covered: coveredByPair.has(`${row}:${bay}`) })
     }
   }
   return cells
 }
 
+/** Id del pattern a scacchi: una sola definizione per tutta la mappa. */
+const EXIT_PATTERN_ID = 'exit-checker'
+
 function fillOf(top: PlacedContainer | null, selected: string | null): string {
   if (!top) return 'transparent'
   if (top.container_number === selected) return SELECTED_CONTAINER_COLOR
+  // Chi e' in uscita vince sul colore di stato, come in 3D: lo stato resta nel pannello e in lista.
+  if (isMarkedForExit(top)) return `url(#${EXIT_PATTERN_ID})`
   if (top.status !== 'active') return CONTAINER_STATUS_COLORS[top.status]
   return top.color || DEFAULT_CONTAINER_COLOR
 }
@@ -55,6 +62,19 @@ function logoBoxOf(cell: Cell): { x: number; y: number; width: number; height: n
   const width = height * BRAND_LOGO_ASPECT
   if (cell.w - width < 2.6) return null
   return { x: cell.x + 0.3, y: cell.y + (cell.h - height) / 2, width, height }
+}
+
+/**
+ * Targhetta bianca dietro logo e numero delle celle a scacchi: sul pattern il numero nero sparisce.
+ * Copre la fascia verticale occupata da logo e scritta, non tutta la cella.
+ */
+function numberPlateOf(
+  cell: Cell,
+  logo: { x: number; y: number; width: number; height: number } | null
+): { x: number; y: number; width: number; height: number } {
+  const top = Math.min(logo ? logo.y : Number.POSITIVE_INFINITY, cell.y + 0.35) - 0.1
+  const bottom = Math.max(logo ? logo.y + logo.height : 0, cell.y + 1.75) + 0.1
+  return { x: cell.x + 0.15, y: top, width: cell.w - 0.3, height: bottom - top }
 }
 
 /** Top-down SVG map of the yard: blocks, bays × rows, top container and stack height per column. */
@@ -96,6 +116,20 @@ export function MapView2D() {
   return (
     <div className="w-full h-full bg-slate-900 p-2 sm:p-4 overflow-hidden">
       <svg viewBox={`-2 -2 ${yard.width + 4} ${yard.length + 4}`} className="w-full h-full" preserveAspectRatio="xMidYMid meet">
+        <defs>
+          {/* Scacchi in metri di piazzale (userSpaceOnUse): stessa taglia dei quadri in 3D. */}
+          <pattern
+            id={EXIT_PATTERN_ID}
+            patternUnits="userSpaceOnUse"
+            width={CHECKER_SQUARE * 2}
+            height={CHECKER_SQUARE * 2}
+          >
+            <rect width={CHECKER_SQUARE * 2} height={CHECKER_SQUARE * 2} fill="#fafafa" />
+            <rect width={CHECKER_SQUARE} height={CHECKER_SQUARE} fill="#cc181e" />
+            <rect x={CHECKER_SQUARE} y={CHECKER_SQUARE} width={CHECKER_SQUARE} height={CHECKER_SQUARE} fill="#cc181e" />
+          </pattern>
+        </defs>
+
         <rect x={0} y={0} width={yard.width} height={yard.length} fill="#1e293b" stroke="#334155" strokeWidth={0.3} />
 
         {showAreas &&
@@ -140,12 +174,15 @@ export function MapView2D() {
                 width={cell.w}
                 height={cell.h}
                 fill={placeable ? '#22c55e' : fillOf(cell.top, selectedContainerNumber)}
-                fillOpacity={placeable ? 0.35 : cell.top ? 0.9 : 0}
+                fillOpacity={placeable ? 0.35 : cell.top ? (isMarkedForExit(cell.top) ? 1 : 0.9) : 0}
                 stroke={isPulse ? '#f472b6' : cell.top ? '#0f172a' : '#334155'}
                 strokeWidth={isPulse ? 0.5 : 0.12}
               />
               {cell.top && (
                 <>
+                  {isMarkedForExit(cell.top) && cell.top.container_number !== selectedContainerNumber && (
+                    <rect {...numberPlateOf(cell, logo)} fill="#ffffff" />
+                  )}
                   {logo && (
                     <image
                       href={BRAND_LOGO_URL}

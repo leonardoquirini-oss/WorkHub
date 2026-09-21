@@ -1,5 +1,15 @@
 # Vista piazzali read-only in BERLink — piano di integrazione
 
+> **IMPLEMENTATO il 2026-09-21** come voce **Piazzali** (`/rcs/piazzali`). Questo file resta come
+> traccia delle misure e delle decisioni; l'implementazione effettiva e' documentata in
+> `BERLink/prompt/IMPLEMENTATION_NOTES.md` nota 51 e in `BERLink/prompt/API.md` §26.
+> Deviazioni dal piano, tutte volute:
+> - la chiave dei numeri (`util/ContainerKeyUtil`) e il suo indice funzionale esistevano gia':
+>   creati per il marchio "da far uscire" (nota 50), qui riusati — niente migrazione nuova;
+> - nessun port di `ContainerLabels` con `Text` per cassa: le etichette usano un **pool** di 48
+>   oggetti riassegnati alle casse piu' vicine;
+> - il polling/SSE dello snapshot non e' stato fatto: c'e' `revision` + pulsante Aggiorna (§5.8).
+
 Data: 2026-09-18 · aggiornato 2026-09-21 con le decisioni chiuse sui dati reali.
 Repo coinvolti: **BERLink** (backend + frontend). WorkHub resta invariato: da qui si copiano solo
 funzioni pure e asset.

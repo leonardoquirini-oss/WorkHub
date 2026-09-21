@@ -4,6 +4,7 @@ import { API_CONFIG, STORAGE_KEYS } from '../api/config'
 import { logger } from '../utils/logger'
 import { notify } from './notificationStore'
 import { baySpanOf, canPlace, cascadePreview, isPlaced, labelOf, posFromTop, restackPreview } from '../utils/slotLayout'
+import { isMarkedForExit } from '../utils/exitMark'
 import type {
   Block,
   Container,
@@ -315,14 +316,16 @@ export const useYardStore = create<YardStore>((set, get) => {
       const containersByStatus: Record<string, number> = {}
       let capacityUsed = 0
       let unallocated = 0
+      let markedForExit = 0
       for (const c of containers) {
         containersByType[c.container_type] = (containersByType[c.container_type] || 0) + 1
         containersByStatus[c.status] = (containersByStatus[c.status] || 0) + 1
         if (isPlaced(c)) capacityUsed += c.bay_span
         else unallocated += 1
+        if (isMarkedForExit(c)) markedForExit += 1
       }
       const maxCapacity = blocks.filter((b) => b.is_active).reduce((sum, b) => sum + b.n_bays * b.n_rows * b.max_tier, 0)
-      return { totalContainers: containers.length, unallocated, containersByType, containersByStatus, capacityUsed, maxCapacity }
+      return { totalContainers: containers.length, unallocated, containersByType, containersByStatus, capacityUsed, maxCapacity, markedForExit }
     },
 
     initializeFromStorage: async () => {

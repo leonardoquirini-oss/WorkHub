@@ -80,9 +80,14 @@ export function Controls({ yardWidth, yardLength }: ControlsProps) {
       maxPolarAngle={Math.PI / 2 - 0.05}
       minPolarAngle={0.1}
       enabled={!isDragging}
+      mouseButtons={{
+        LEFT: THREE.MOUSE.PAN, // drag on empty ground pans; on a container it selects (stops propagation before reaching here)
+        MIDDLE: THREE.MOUSE.DOLLY,
+        RIGHT: THREE.MOUSE.ROTATE,
+      }}
       touches={{
-        ONE: THREE.TOUCH.ROTATE, // one finger on empty ground orbits; on a container it selects / long-press picks up
-        TWO: THREE.TOUCH.DOLLY_PAN,
+        ONE: THREE.TOUCH.PAN, // one finger on empty ground pans; on a container it selects / long-press picks up
+        TWO: THREE.TOUCH.DOLLY_ROTATE, // pinch = zoom, twist = orbit — kept separate from pan
       }}
     />
   )

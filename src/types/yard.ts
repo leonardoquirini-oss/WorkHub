@@ -14,7 +14,8 @@ export interface YardArea {
   color: string
 }
 
-export type BlockOrientation = 0 | 90
+/** 0/90: bay lungo X/Y da origin_x/origin_y. 180/270: come 0/90 ma dall'angolo opposto. */
+export type BlockOrientation = 0 | 90 | 180 | 270
 
 /**
  * A block is a grid of slots inside a yard: `n_bays` × `n_rows` ground positions,
@@ -71,6 +72,8 @@ export interface YardStats {
   capacityUsed: number
   /** TEU capacity of all active blocks (bays × rows × max_tier). */
   maxCapacity: number
+  /** Casse marcate "da far uscire" da RCS (vedi `utils/exitMark.ts`). */
+  markedForExit: number
 }
 
 /** `GET /api/workhub/yards/{id}/snapshot` */

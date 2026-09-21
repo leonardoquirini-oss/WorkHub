@@ -2,7 +2,7 @@ import { useYardStore } from '../../store/yardStore'
 import { useUIStore } from '../../store/uiStore'
 import { usePortrait } from '../../hooks/useMediaQuery'
 import { CONTAINER_TYPE_LABELS, CONTAINER_STATUS_LABELS, CONTAINER_STATUS_COLORS } from '../../constants/containerSizes'
-import { Package, Layers } from 'lucide-react'
+import { Package, Layers, LogOut } from 'lucide-react'
 
 export function YardStats() {
   const { getYardStats, selectedYardId, yards, blocks } = useYardStore()
@@ -42,6 +42,18 @@ export function YardStats() {
             </p>
           </div>
         </div>
+
+        {stats.markedForExit > 0 && (
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-red-500/20 rounded-lg">
+              <LogOut className="w-4 h-4 text-red-400" />
+            </div>
+            <div>
+              <p className="text-xs text-slate-400">Da far uscire</p>
+              <p className="text-lg font-semibold text-white">{stats.markedForExit}</p>
+            </div>
+          </div>
+        )}
 
         {Object.keys(stats.containersByType).length > 0 && (
           <div>

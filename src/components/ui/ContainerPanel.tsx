@@ -7,6 +7,7 @@ import { useAuthStore } from '../../store/authStore'
 import { notify } from '../../store/notificationStore'
 import { CONTAINER_TYPE_LABELS, CONTAINER_STATUS_LABELS, CONTAINER_STATUS_COLORS } from '../../constants/containerSizes'
 import { columnBaseHeight, columnOf, containerHeight, isPlaced, slotBox } from '../../utils/slotLayout'
+import { daysWaiting, exitReference, isMarkedForExit } from '../../utils/exitMark'
 import { ConfirmDialog } from './ConfirmDialog'
 import { ContainerEditForm } from './ContainerEditForm'
 import { ContainerHistory } from './ContainerHistory'
@@ -43,7 +44,9 @@ export function ContainerPanel() {
 
   const doExit = async () => {
     setConfirmExit(false)
-    const ok = await exitContainer(c.container_number)
+    // La nota del movimento porta il riferimento RCS: nello storico resta scritto perche' e' uscito.
+    const note = isMarkedForExit(c) ? `Uscita da registro RCS · ${exitReference(c)}` : undefined
+    const ok = await exitContainer(c.container_number, note)
     if (ok) {
       notify.success(`Container ${c.container_number} uscito dal piazzale`)
       clearSelection()
@@ -82,6 +85,7 @@ export function ContainerPanel() {
         {tab === 'info' ? (
           <div className="p-4 space-y-4">
             <PositionCard container={c} containers={containers} />
+            {isMarkedForExit(c) && <ExitMarkCard container={c} onExit={canWrite ? () => setConfirmExit(true) : null} />}
             {c.registry_match === false && (
               <p className="flex items-start gap-2 text-xs text-amber-300 bg-amber-500/10 border border-amber-500/40 rounded-lg p-2">
                 <AlertTriangle className="w-4 h-4 shrink-0" /> Numero non presente nel registro container
@@ -143,6 +147,36 @@ export function ContainerPanel() {
         />
       )}
     </aside>
+  )
+}
+
+/**
+ * Marchio "da far uscire": la merce e' stata scaricata in RCS, la cassa e' ancora in piazzale.
+ * Il riferimento al registro e i giorni di attesa dicono all'operatore da quanto aspetta e perche'.
+ */
+function ExitMarkCard({ container: c, onExit }: { container: Container; onExit: (() => void) | null }) {
+  const days = daysWaiting(c)
+  const reference = exitReference(c)
+  return (
+    <div className="rounded-lg bg-red-500/10 border border-red-500/40 p-3 space-y-2">
+      <div className="flex items-center gap-2 text-sm font-medium text-red-300">
+        <LogOut className="w-4 h-4 shrink-0" /> Da far uscire
+      </div>
+      {reference && <p className="text-xs text-red-200/90">{reference}</p>}
+      {days != null && (
+        <p className="text-xs text-slate-300">
+          In attesa da <span className="text-white font-medium">{days}</span> {days === 1 ? 'giorno' : 'giorni'}
+        </p>
+      )}
+      {onExit && (
+        <button
+          onClick={onExit}
+          className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-red-600/80 hover:bg-red-600 text-white text-sm"
+        >
+          <LogOut className="w-4 h-4" /> Registra uscita
+        </button>
+      )}
+    </div>
   )
 }
 

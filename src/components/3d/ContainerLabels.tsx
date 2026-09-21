@@ -5,7 +5,8 @@ import * as THREE from 'three'
 import { BRAND_LOGO_ASPECT, BRAND_LOGO_URL, hasBrandLogo } from '../../constants/branding'
 import { CONTAINER_DIMENSIONS } from '../../constants/containerSizes'
 import { CONTAINER_NUMBER_COLOR } from '../../constants/yardConfig'
-import { columnBaseHeight, isPlaced, slotBox } from '../../utils/slotLayout'
+import { columnBaseHeight, isPlaced, isRotated, slotBox } from '../../utils/slotLayout'
+import { isMarkedForExit } from '../../utils/exitMark'
 import { logger } from '../../utils/logger'
 import type { Block, Container, PlacedContainer } from '../../types'
 
@@ -37,6 +38,13 @@ const LOGO_FACE_RATIO = 0.7
 const LOGO_MAX_SHARE = 0.3
 /** Gap between logo and number, as a share of the logo width. */
 const LOGO_GAP_SHARE = 0.2
+/**
+ * Targhetta bianca dietro logo e numero sulle casse a scacchi: su quadri da mezzo metro il
+ * numero, largo un metro, sarebbe illeggibile. Altezza in multipli dello spazio occupato.
+ */
+const PLATE_PADDING = 1.15
+/** Distanza (m) fra targhetta e scritta: la targhetta sta fra la cassa e il testo. */
+const PLATE_DEPTH = 0.01
 
 interface FaceLabel {
   number: string
@@ -52,6 +60,8 @@ interface FaceLabel {
   textX: number
   /** Logo placed at the left of the number, when the container carries one. */
   logo: { x: number; width: number; height: number } | null
+  /** Targhetta bianca dietro logo e numero, solo per le casse marcate per l'uscita. */
+  plate: { width: number; height: number } | null
 }
 
 const tmp = new THREE.Vector3()
@@ -93,7 +103,7 @@ function labelOf(c: PlacedContainer, block: Block, all: Container[]): FaceLabel 
   // bays) or shorter (a 45' overhangs): the label follows the cassa, not the footprint.
   const dims = CONTAINER_DIMENSIONS[c.container_type] ?? CONTAINER_DIMENSIONS['40']
   const box = slotBox(block, c.bay, c.row_no, c.bay_span, columnBaseHeight(all, c), dims.height)
-  const rotated = block.orientation === 90
+  const rotated = isRotated(block.orientation)
   const along = dims.length
   const across = dims.width
   const branded = hasBrandLogo(c.container_number)
@@ -118,6 +128,9 @@ function labelOf(c: PlacedContainer, block: Block, all: Container[]): FaceLabel 
     textWidth: available,
     textX: (logoWidth + gap) / 2,
     logo: branded ? { x: -width / 2 + logoWidth / 2, width: logoWidth, height: logoHeight } : null,
+    plate: isMarkedForExit(c)
+      ? { width, height: Math.max(logoHeight, fontSize * 1.6) * PLATE_PADDING }
+      : null,
   }
 }
 
@@ -197,6 +210,12 @@ export function ContainerLabels({ containers, blocks, selectedNumber, pulseNumbe
             }}
             position={label.center}
           >
+            {label.plate && (
+              <mesh position={[0, 0, -PLATE_DEPTH]}>
+                <planeGeometry args={[label.plate.width, label.plate.height]} />
+                <meshBasicMaterial color="#ffffff" toneMapped={false} />
+              </mesh>
+            )}
             {label.logo && logoTexture && (
               <mesh position={[label.logo.x, 0, 0]}>
                 <planeGeometry args={[label.logo.width, label.logo.height]} />

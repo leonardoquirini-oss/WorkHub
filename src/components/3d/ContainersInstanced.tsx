@@ -3,8 +3,10 @@ import { useThree, type ThreeEvent } from '@react-three/fiber'
 import * as THREE from 'three'
 import { CONTAINER_DIMENSIONS, CONTAINER_STATUS_COLORS } from '../../constants/containerSizes'
 import { DEFAULT_CONTAINER_COLOR, SELECTED_CONTAINER_COLOR } from '../../constants/yardConfig'
-import { columnBaseHeight, isPlaced, slotBox } from '../../utils/slotLayout'
+import { columnBaseHeight, isPlaced, isRotated, slotBox } from '../../utils/slotLayout'
 import { RIB_BUMP_SCALE, ribTexture } from '../../utils/ribTexture'
+import { checkerTexture } from '../../utils/checkerTexture'
+import { isMarkedForExit } from '../../utils/exitMark'
 import type { Block, Container, ContainerType, PlacedContainer } from '../../types'
 
 interface ContainersInstancedProps {
@@ -29,15 +31,22 @@ const tmpScale = new THREE.Vector3()
 const tmpColor = new THREE.Color()
 const ROT_90 = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI / 2)
 const ROT_0 = new THREE.Quaternion()
+/** Bianco: la texture a scacchi delle casse in uscita va moltiplicata per un colore neutro. */
+const MARKED_CONTAINER_COLOR = '#ffffff'
 
 function colorOf(c: Container, selected: boolean): string {
   if (selected) return SELECTED_CONTAINER_COLOR
+  // La scacchiera di chi e' in uscita e' una `map`: moltiplica instanceColor, che quindi resta
+  // bianco (il colore di stato resta leggibile nel pannello e nella lista).
+  if (isMarkedForExit(c)) return MARKED_CONTAINER_COLOR
   if (c.status !== 'active') return CONTAINER_STATUS_COLORS[c.status] ?? DEFAULT_CONTAINER_COLOR
   return c.color || DEFAULT_CONTAINER_COLOR
 }
 
 interface TypeInstancesProps {
   type: ContainerType
+  /** Casse marcate "da far uscire": stesso tipo, materiale a scacchi. */
+  marked: boolean
   list: PlacedContainer[]
   all: Container[]
   blocksById: Map<number, Block>
@@ -50,7 +59,7 @@ interface TypeInstancesProps {
 }
 
 /** One InstancedMesh per container type (same box geometry, per-instance transform + colour). */
-function TypeInstances({ type, list, all, blocksById, selectedNumber, hiddenNumber, onPointerDown, onPointerUp, onClick, onContextMenu }: TypeInstancesProps) {
+function TypeInstances({ type, marked, list, all, blocksById, selectedNumber, hiddenNumber, onPointerDown, onPointerUp, onClick, onContextMenu }: TypeInstancesProps) {
   const ref = useRef<THREE.InstancedMesh>(null)
   const invalidate = useThree((s) => s.invalidate)
   const dims = CONTAINER_DIMENSIONS[type]
@@ -58,6 +67,13 @@ function TypeInstances({ type, list, all, blocksById, selectedNumber, hiddenNumb
   // Costolatura verticale della cassa: una costola ogni RIB_PITCH lungo la faccia.
   const ribs = useMemo(() => ribTexture(dims.length), [dims.length])
   useEffect(() => () => ribs.dispose(), [ribs])
+
+  // Chi e' in uscita porta la scacchiera come colore e la costolatura come solo rilievo.
+  const checker = useMemo(
+    () => (marked ? checkerTexture(dims.length, dims.height) : null),
+    [marked, dims.length, dims.height]
+  )
+  useEffect(() => () => checker?.dispose(), [checker])
 
   useLayoutEffect(() => {
     const mesh = ref.current
@@ -70,7 +86,7 @@ function TypeInstances({ type, list, all, blocksById, selectedNumber, hiddenNumb
         const box = slotBox(block, c.bay, c.row_no, c.bay_span, columnBaseHeight(all, c), dims.height)
         tmpPos.set(box.center[0], box.center[1], box.center[2])
         tmpScale.set(1, 1, 1)
-        tmpQuat.copy(block.orientation === 90 ? ROT_90 : ROT_0)
+        tmpQuat.copy(isRotated(block.orientation) ? ROT_90 : ROT_0)
         tmpMatrix.compose(tmpPos, tmpQuat, tmpScale)
       }
       mesh.setMatrixAt(i, tmpMatrix)
@@ -111,7 +127,13 @@ function TypeInstances({ type, list, all, blocksById, selectedNumber, hiddenNumb
       }}
     >
       <boxGeometry args={[dims.length, dims.height, dims.width]} />
-      <meshStandardMaterial map={ribs} bumpMap={ribs} bumpScale={RIB_BUMP_SCALE} roughness={0.75} metalness={0.15} />
+      <meshStandardMaterial
+        map={checker ?? ribs}
+        bumpMap={ribs}
+        bumpScale={RIB_BUMP_SCALE}
+        roughness={0.75}
+        metalness={0.15}
+      />
     </instancedMesh>
   )
 }
@@ -119,25 +141,30 @@ function TypeInstances({ type, list, all, blocksById, selectedNumber, hiddenNumb
 export function ContainersInstanced({ containers, blocks, selectedNumber, hiddenNumber, onPointerDown, onPointerUp, onClick, onContextMenu }: ContainersInstancedProps) {
   const blocksById = useMemo(() => new Map(blocks.map((b) => [b.id_block, b])), [blocks])
 
-  const byType = useMemo(() => {
-    const groups = new Map<ContainerType, PlacedContainer[]>()
+  // Un InstancedMesh per (tipo, marcato): il materiale a scacchi vale per tutta l'istanza, quindi
+  // le casse in uscita vanno in un gruppo a parte.
+  const groups = useMemo(() => {
+    const out = new Map<string, { type: ContainerType; marked: boolean; list: PlacedContainer[] }>()
     for (const c of containers) {
       if (!isPlaced(c)) continue
       const type = (CONTAINER_DIMENSIONS[c.container_type] ? c.container_type : '40') as ContainerType
-      const list = groups.get(type) ?? []
-      list.push(c)
-      groups.set(type, list)
+      const marked = isMarkedForExit(c)
+      const key = `${type}|${marked ? 'exit' : 'ok'}`
+      const group = out.get(key) ?? { type, marked, list: [] }
+      group.list.push(c)
+      out.set(key, group)
     }
-    return groups
+    return out
   }, [containers])
 
   return (
     <group>
-      {Array.from(byType.entries()).map(([type, list]) => (
+      {Array.from(groups.entries()).map(([key, group]) => (
         <TypeInstances
-          key={type}
-          type={type}
-          list={list}
+          key={key}
+          type={group.type}
+          marked={group.marked}
+          list={group.list}
           all={containers}
           blocksById={blocksById}
           selectedNumber={selectedNumber}

@@ -4,10 +4,12 @@
  *
  * Coordinate conventions:
  * - Server `position_x` = world X, `position_y` = world Z (ground depth), `position_z` = height.
- * - Block local axes: `u` runs along the bays, `v` along the rows. With `orientation = 0`
- *   `u` maps to world X and `v` to world Z; with `orientation = 90` they are swapped.
- * - A bay is a 20' unit. Every type longer than a 20' (30', 40', 40HC, 45HC) takes two
- *   consecutive bays starting on an ODD bay and is registered on that odd bay.
+ * - Block local axes: `u` runs along the bays, `v` along the rows. With `orientation` 0/180
+ *   `u` maps to world X and `v` to world Z; with 90/270 they are swapped. 180/270 count bay 1 /
+ *   row 1 from the corner OPPOSITE `origin_x/origin_y` instead — four 90° turns return to 0.
+ * - A bay is a 20'-equivalent slot (TEU convention): 20' and 30' take one bay. 40'/40HC/45HC take
+ *   two consecutive bays starting on an ODD bay and are registered on that odd bay (this rule is
+ *   the same regardless of orientation: it's about the logical bay index, not the physical direction).
  * - Stacks are homogeneous: every tier of a column has the same `bay` and `bay_span`.
  */
 import type { Block, Container, ContainerType, PlacedContainer, SlotRef, BaySpan } from '../types'
@@ -26,7 +28,7 @@ export interface PlacementResult {
 }
 
 export function baySpanOf(type: ContainerType | string): BaySpan {
-  return type === '20' ? 1 : 2
+  return type === '20' || type === '30' ? 1 : 2
 }
 
 export function containerHeight(type: ContainerType | string): number {
@@ -42,11 +44,30 @@ export function footprintLength(block: Block, span: BaySpan): number {
   return span * block.bay_length + (span - 1) * block.gap
 }
 
-/** World min-corner of a slot. */
-export function slotOrigin(block: Block, bay: number, row: number): { x: number; z: number } {
-  const u = (bay - 1) * (block.bay_length + block.gap)
-  const v = (row - 1) * (block.row_width + block.gap)
-  return block.orientation === 90
+/** True when `orientation` runs the bay axis along world Z instead of X (90°/270°). */
+export function isRotated(orientation: number): boolean {
+  return orientation === 90 || orientation === 270
+}
+/** True when `orientation` counts bay 1 / row 1 from the corner OPPOSITE origin_x/origin_y (180°/270°). */
+export function isReversed(orientation: number): boolean {
+  return orientation === 180 || orientation === 270
+}
+
+/**
+ * World min-corner of a slot. `span` (bay footprint, default 1) only matters when `orientation`
+ * is 180/270: reflecting a multi-bay footprint needs its full length, not just the start bay
+ * (mirror di `SlotGeometry.worldPosition` lato BERLink).
+ */
+export function slotOrigin(block: Block, bay: number, row: number, span: BaySpan = 1): { x: number; z: number } {
+  let u = (bay - 1) * (block.bay_length + block.gap)
+  let v = (row - 1) * (block.row_width + block.gap)
+  if (isReversed(block.orientation)) {
+    const baysExtent = block.n_bays * block.bay_length + (block.n_bays - 1) * block.gap
+    const rowsExtent = block.n_rows * block.row_width + (block.n_rows - 1) * block.gap
+    u = baysExtent - footprintLength(block, span) - u
+    v = rowsExtent - block.row_width - v // le row occupano sempre 1 sola row (span 1)
+  }
+  return isRotated(block.orientation)
     ? { x: block.origin_x + v, z: block.origin_y + u }
     : { x: block.origin_x + u, z: block.origin_y + v }
 }
@@ -55,19 +76,19 @@ export function slotOrigin(block: Block, bay: number, row: number): { x: number;
 export function slotBox(block: Block, bay: number, row: number, span: BaySpan, baseY: number, height: number): SlotBox {
   const along = footprintLength(block, span)
   const across = block.row_width
-  const o = slotOrigin(block, bay, row)
-  if (block.orientation === 90) {
+  const o = slotOrigin(block, bay, row, span)
+  if (isRotated(block.orientation)) {
     return { center: [o.x + across / 2, baseY + height / 2, o.z + along / 2], size: [across, height, along] }
   }
   return { center: [o.x + along / 2, baseY + height / 2, o.z + across / 2], size: [along, height, across] }
 }
 
-/** World rectangle covered by a block (without the trailing gap). */
+/** World rectangle covered by a block (without the trailing gap). Independent of 0/90/180/270: it's the outer box, not which corner counts from. */
 export function blockBounds(block: Block): { x0: number; z0: number; x1: number; z1: number } {
   const alongBays = block.n_bays * block.bay_length + (block.n_bays - 1) * block.gap
   const alongRows = block.n_rows * block.row_width + (block.n_rows - 1) * block.gap
-  const dx = block.orientation === 90 ? alongRows : alongBays
-  const dz = block.orientation === 90 ? alongBays : alongRows
+  const dx = isRotated(block.orientation) ? alongRows : alongBays
+  const dz = isRotated(block.orientation) ? alongBays : alongRows
   return { x0: block.origin_x, z0: block.origin_y, x1: block.origin_x + dx, z1: block.origin_y + dz }
 }
 
@@ -76,13 +97,20 @@ export function blockBounds(block: Block): { x0: number; z0: number; x1: number;
  * Returns null when the point is outside the block or the footprint does not fit.
  */
 export function worldToSlot(block: Block, x: number, z: number, span: BaySpan): { bay: number; row: number } | null {
-  const u = block.orientation === 90 ? z - block.origin_y : x - block.origin_x
-  const v = block.orientation === 90 ? x - block.origin_x : z - block.origin_y
+  const rotated = isRotated(block.orientation)
+  const reversed = isReversed(block.orientation)
+  const u = rotated ? z - block.origin_y : x - block.origin_x
+  const v = rotated ? x - block.origin_x : z - block.origin_y
   if (u < 0 || v < 0) return null
 
-  let bay = Math.floor(u / (block.bay_length + block.gap)) + 1
-  const row = Math.floor(v / (block.row_width + block.gap)) + 1
-  if (row < 1 || row > block.n_rows || bay < 1 || bay > block.n_bays) return null
+  // "Fisico": bay/row come se il blocco non fosse mai invertito, solo dalla posizione nel mondo.
+  const physicalBay = Math.floor(u / (block.bay_length + block.gap)) + 1
+  const physicalRow = Math.floor(v / (block.row_width + block.gap)) + 1
+  if (physicalRow < 1 || physicalRow > block.n_rows || physicalBay < 1 || physicalBay > block.n_bays) return null
+
+  let bay = reversed ? block.n_bays - span - physicalBay + 2 : physicalBay
+  const row = reversed ? block.n_rows - physicalRow + 1 : physicalRow
+  if (bay < 1 || bay > block.n_bays) return null
 
   if (span === 2) {
     if (bay % 2 === 0) bay -= 1

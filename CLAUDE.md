@@ -31,11 +31,16 @@ types/      container.ts, yard.ts (Block, YardSnapshot, YardEvent), auth.ts
 ## Regole di dominio (specchio del backend `YardSlotService`)
 
 - Posizione = slot `id_block, bay, row_no, tier` (1 = terra). Label `PIAZZALE-BLOCCO-BAY-ROW`; "N° dall'alto" = `pos_from_top` (derivato dal server).
-- `20'` occupa 1 bay; `40/40HC/45HC` occupano 2 bay a partire da un bay **dispari**. Una colonna e' omogenea per ingombro.
+- `20'/30'` occupano 1 bay (convenzione TEU); `40/40HC/45HC` occupano 2 bay a partire da un bay **dispari**. Una colonna e' omogenea per ingombro.
 - Il client valida in locale (`slotLayout.canPlace`) solo per l'anteprima: la verita' e' il server. Ogni mutazione manda `version`; **409** → rollback + `loadSnapshot()`.
 - Riordino dentro la colonna (`POST /containers/{n}/restack`, `slotLayout.restackPreview`): scambio con il container sotto/sopra e risalita in cima; chi sta in mezzo scala di un livello. Fuori colonna si usa `/move`.
 - Spostamenti solo nello stesso sito; cambio sito = uscita + nuovo ingresso. La cascata (chi sta sopra scende) e' server-side: il client la applica dalla risposta/evento.
 - `position_x/y/z` del server sono cache: il rendering usa `slotLayout.slotToWorld`.
+- **Da far uscire**: se `id_exit_availability` e' valorizzato, in RCS l'ultima riga di registro di
+  quella cassa risulta scaricata (>= 95%): la merce non c'e' piu' ma la cassa e' in piazzale. Il
+  marchio e' **derivato dal backend** (mai scritto dall'app) e si mostra con la cassa a scacchi
+  bianco/rosso in 3D e in mappa (`utils/exitMark.ts`, `utils/checkerTexture.ts`); vince sul colore
+  di stato, che resta nel pannello e in lista.
 
 ## Contratto API
 

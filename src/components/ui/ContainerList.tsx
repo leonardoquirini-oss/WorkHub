@@ -4,9 +4,10 @@ import { useUIStore } from '../../store/uiStore'
 import { CONTAINER_STATUS_COLORS, CONTAINER_STATUS_LABELS, CONTAINER_TYPE_LABELS } from '../../constants/containerSizes'
 import { ArrowDown, ArrowUp } from 'lucide-react'
 import { formatDate } from '../../utils/format'
+import { daysWaiting, exitReference, isMarkedForExit } from '../../utils/exitMark'
 import type { Container } from '../../types'
 
-type SortKey = 'label' | 'container_number' | 'container_type' | 'status' | 'pos_from_top' | 'updated_at'
+type SortKey = 'label' | 'container_number' | 'container_type' | 'status' | 'pos_from_top' | 'updated_at' | 'exit_off_date'
 
 const COLUMNS: { key: SortKey; label: string }[] = [
   { key: 'label', label: 'Posizione' },
@@ -14,6 +15,7 @@ const COLUMNS: { key: SortKey; label: string }[] = [
   { key: 'container_number', label: 'Container' },
   { key: 'container_type', label: 'Tipo' },
   { key: 'status', label: 'Stato' },
+  { key: 'exit_off_date', label: 'In uscita' },
   { key: 'updated_at', label: 'Aggiornato' },
 ]
 
@@ -22,6 +24,17 @@ function compare(a: Container, b: Container, key: SortKey): number {
   const vb = b[key] ?? ''
   if (typeof va === 'number' && typeof vb === 'number') return va - vb
   return String(va).localeCompare(String(vb), 'it')
+}
+
+/** Riferimento RCS dell'uscita e attesa accumulata, per le casse marcate "da far uscire". */
+function ExitCell({ container: c }: { container: Container }) {
+  const days = daysWaiting(c)
+  return (
+    <span className="text-red-300">
+      {exitReference(c) || 'da far uscire'}
+      {days != null && <span className="text-slate-400"> · {days}g</span>}
+    </span>
+  )
 }
 
 /** Sortable table of all containers of the yard (placed and to-be-allocated). */
@@ -89,6 +102,9 @@ export function ContainerList() {
                   <span className="w-2 h-2 rounded-full" style={{ backgroundColor: CONTAINER_STATUS_COLORS[c.status] }} />
                   {CONTAINER_STATUS_LABELS[c.status] ?? c.status}
                 </span>
+              </td>
+              <td className="px-3 py-2 text-xs whitespace-nowrap">
+                {isMarkedForExit(c) ? <ExitCell container={c} /> : <span className="text-slate-600">-</span>}
               </td>
               <td className="px-3 py-2 text-xs text-slate-400 whitespace-nowrap">{formatDate(c.updated_at ?? c.created_at)}</td>
               <td className="px-3 py-2 text-right">

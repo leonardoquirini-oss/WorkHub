@@ -36,6 +36,10 @@ const block: Block = {
 
 const rotated: Block = { ...block, id_block: 2, code: 'B', orientation: 90, origin_x: 60, origin_y: 5 }
 
+// Stessi numeri di SlotGeometryTest.java lato BERLink (n_bays=5, n_rows=3), per incrociare i due lati.
+const reversed: Block = { ...block, id_block: 3, code: 'C', orientation: 180, origin_x: 10, origin_y: 5, n_bays: 5, n_rows: 3 }
+const reversedRotated: Block = { ...block, id_block: 4, code: 'D', orientation: 270, origin_x: 10, origin_y: 5, n_bays: 5, n_rows: 3 }
+
 function ctr(number: string, type: ContainerType, bay: number, row: number, tier: number, idBlock = 1): Container {
   return {
     container_number: number,
@@ -56,12 +60,12 @@ function ctr(number: string, type: ContainerType, bay: number, row: number, tier
 }
 
 describe('footprint and geometry', () => {
-  it("a 20' takes one bay, others take two", () => {
+  it("20' and 30' take one bay (TEU), 40'/40HC/45HC take two", () => {
     expect(baySpanOf('20')).toBe(1)
+    expect(baySpanOf('30')).toBe(1)
     expect(baySpanOf('40')).toBe(2)
     expect(baySpanOf('40HC')).toBe(2)
     expect(baySpanOf('45HC')).toBe(2)
-    expect(baySpanOf('30')).toBe(2)
     expect(footprintLength(block, 2)).toBeCloseTo(12.5)
   })
 
@@ -93,11 +97,27 @@ describe('footprint and geometry', () => {
     const r = blockBounds(rotated)
     expect(r.x1 - r.x0).toBeCloseTo(3 * 2.4 + 2 * 0.3)
   })
+
+  it('slotOrigin with orientation 180 counts bay/row from the corner OPPOSITE origin_x/origin_y', () => {
+    const p1 = slotOrigin(reversed, 1, 1, 1)
+    expect(p1.x).toBeCloseTo(10 + 25.6) // 5*6.1+4*0.3 - 6.1 - 0
+    expect(p1.z).toBeCloseTo(5 + 5.4) // 3*2.4+2*0.3 - 2.4 - 0
+
+    // span 2 (40'): l'intero footprint va riflesso, non solo il bay di partenza.
+    const p2 = slotOrigin(reversed, 3, 1, 2)
+    expect(p2.x).toBeCloseTo(10 + 6.4) // 31.7 - footprintLength(2)=12.5 - along(bay3)=12.8
+  })
+
+  it('slotOrigin with orientation 270 swaps axes AND counts from the opposite corner', () => {
+    const p = slotOrigin(reversedRotated, 2, 2, 1)
+    expect(p.x).toBeCloseTo(10 + 2.7) // row reversed: 7.8 - 2.4 - 2.7
+    expect(p.z).toBeCloseTo(5 + 19.2) // bay reversed: 31.7 - 6.1 - 6.4
+  })
 })
 
 describe('worldToSlot', () => {
-  it('round-trips slotOrigin for both orientations', () => {
-    for (const b of [block, rotated]) {
+  it('round-trips slotOrigin for all four orientations', () => {
+    for (const b of [block, rotated, reversed, reversedRotated]) {
       for (let bay = 1; bay <= b.n_bays; bay++) {
         for (let row = 1; row <= b.n_rows; row++) {
           const o = slotOrigin(b, bay, row)

@@ -1,7 +1,7 @@
 import { useLayoutEffect, useMemo, useRef } from 'react'
 import { Line, Text } from '@react-three/drei'
 import * as THREE from 'three'
-import { blockBounds, slotOrigin } from '../../utils/slotLayout'
+import { blockBounds, isReversed, isRotated, slotOrigin } from '../../utils/slotLayout'
 import type { Block } from '../../types'
 
 interface Block3DProps {
@@ -25,8 +25,8 @@ export function Block3D({ block }: Block3DProps) {
     for (let bay = 1; bay <= block.n_bays; bay++) {
       for (let row = 1; row <= block.n_rows; row++) {
         const o = slotOrigin(block, bay, row)
-        const along = block.orientation === 90 ? block.row_width : block.bay_length
-        const across = block.orientation === 90 ? block.bay_length : block.row_width
+        const along = isRotated(block.orientation) ? block.row_width : block.bay_length
+        const across = isRotated(block.orientation) ? block.bay_length : block.row_width
         tmpMatrix.makeRotationX(-Math.PI / 2)
         tmpMatrix.setPosition(o.x + along / 2, 0.015, o.z + across / 2)
         // plane geometry is 1x1: scale to the cell size (x = along world X, y = along world Z)
@@ -66,7 +66,7 @@ export function Block3D({ block }: Block3DProps) {
     return items
   }, [block])
 
-  const textRotation: [number, number, number] = [-Math.PI / 2, 0, block.orientation === 90 ? -Math.PI / 2 : 0]
+  const textRotation: [number, number, number] = [-Math.PI / 2, 0, isRotated(block.orientation) ? -Math.PI / 2 : 0]
 
   return (
     <group>
@@ -96,9 +96,21 @@ export function Block3D({ block }: Block3DProps) {
   )
 }
 
-/** Block-local (u along bays, v along rows) → world (x, z). */
+/**
+ * Block-local (u along bays, v along rows) → world (x, z). With orientation 180/270 riflette u/v
+ * (bay=1/row=1 e' dal lato opposto a origin_x/origin_y): stessa identita' geometrica di
+ * `slotOrigin` in `slotLayout.ts` (un punto locale riflesso e' l'estensione meno il punto).
+ */
 function toWorld(block: Block, u: number, v: number): { x: number; z: number } {
-  return block.orientation === 90
-    ? { x: block.origin_x + v, z: block.origin_y + u }
-    : { x: block.origin_x + u, z: block.origin_y + v }
+  let uu = u
+  let vv = v
+  if (isReversed(block.orientation)) {
+    const baysExtent = block.n_bays * block.bay_length + (block.n_bays - 1) * block.gap
+    const rowsExtent = block.n_rows * block.row_width + (block.n_rows - 1) * block.gap
+    uu = baysExtent - u
+    vv = rowsExtent - v
+  }
+  return isRotated(block.orientation)
+    ? { x: block.origin_x + vv, z: block.origin_y + uu }
+    : { x: block.origin_x + uu, z: block.origin_y + vv }
 }
