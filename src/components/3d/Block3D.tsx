@@ -66,7 +66,8 @@ export function Block3D({ block }: Block3DProps) {
     return items
   }, [block])
 
-  const textRotation: [number, number, number] = [-Math.PI / 2, 0, isRotated(block.orientation) ? -Math.PI / 2 : 0]
+  // +Pi in piu' sul giro in pianta: erano a testa in giu' viste dall'alto.
+  const textRotation: [number, number, number] = [-Math.PI / 2, 0, isRotated(block.orientation) ? Math.PI / 2 : Math.PI]
 
   return (
     <group>

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { useFrame, useThree } from '@react-three/fiber'
 import { Text } from '@react-three/drei'
 import * as THREE from 'three'
@@ -62,6 +62,8 @@ interface FaceLabel {
   logo: { x: number; width: number; height: number } | null
   /** Targhetta bianca dietro logo e numero, solo per le casse marcate per l'uscita. */
   plate: { width: number; height: number } | null
+  /** Numero anche sul tetto, per la vista dall'alto: posizione locale (sopra il centro) e misura. */
+  roof: { y: number; fontSize: number; maxWidth: number }
 }
 
 const tmp = new THREE.Vector3()
@@ -118,12 +120,16 @@ function labelOf(c: PlacedContainer, block: Block, all: Container[]): FaceLabel 
   const chars = Math.max(c.container_number.length, 8)
   const available = width - logoWidth - gap
   const fontSize = Math.min(Math.max(available / (chars * CHAR_ADVANCE), 0.3), dims.height * NUMBER_MAX_RATIO)
+  // Sul tetto lo spazio e' vincolato dalla larghezza della cassa (across), non dall'altezza:
+  // stessa formula per-carattere, cap sulla larghezza invece che sull'altezza.
+  const roofFontSize = Math.min(Math.max((along * TEXT_FILL) / (chars * CHAR_ADVANCE), 0.3), across * NUMBER_MAX_RATIO * 2)
   return {
     number: c.container_number,
     center: box.center,
     half: across / 2,
     axis: rotated ? 'x' : 'z',
     fontSize,
+    roof: { y: dims.height / 2 + FACE_OFFSET, fontSize: roofFontSize, maxWidth: along * TEXT_FILL },
     // [ logo ][ gap ][ number ]: the logo eats the left end, the number is centred in the rest
     textWidth: available,
     textX: (logoWidth + gap) / 2,
@@ -202,43 +208,67 @@ export function ContainerLabels({ containers, blocks, selectedNumber, pulseNumbe
       {visible.map((n) => {
         const label = byNumber.get(n)!
         return (
-          <group
-            key={n}
-            ref={(g) => {
-              if (g) groups.current.set(n, g)
-              else groups.current.delete(n)
-            }}
-            position={label.center}
-          >
-            {label.plate && (
-              <mesh position={[0, 0, -PLATE_DEPTH]}>
-                <planeGeometry args={[label.plate.width, label.plate.height]} />
-                <meshBasicMaterial color="#ffffff" toneMapped={false} />
-              </mesh>
-            )}
-            {label.logo && logoTexture && (
-              <mesh position={[label.logo.x, 0, 0]}>
-                <planeGeometry args={[label.logo.width, label.logo.height]} />
-                <meshBasicMaterial map={logoTexture} transparent depthWrite={false} toneMapped={false} />
-              </mesh>
-            )}
-            <Text
-              position={[label.textX, 0, 0]}
-              fontSize={label.fontSize}
-              color={CONTAINER_NUMBER_COLOR}
-              anchorX="center"
-              anchorY="middle"
-              maxWidth={label.textWidth}
-              strokeWidth={label.fontSize * NUMBER_STROKE}
-              strokeColor={CONTAINER_NUMBER_COLOR}
-              outlineWidth={label.fontSize * 0.03}
-              outlineColor="#ffffff"
-              outlineOpacity={0.4}
-              depthOffset={-2}
+          <Fragment key={n}>
+            <group
+              ref={(g) => {
+                if (g) groups.current.set(n, g)
+                else groups.current.delete(n)
+              }}
+              position={label.center}
             >
-              {n}
-            </Text>
-          </group>
+              {label.plate && (
+                <mesh position={[0, 0, -PLATE_DEPTH]}>
+                  <planeGeometry args={[label.plate.width, label.plate.height]} />
+                  <meshBasicMaterial color="#ffffff" toneMapped={false} />
+                </mesh>
+              )}
+              {label.logo && logoTexture && (
+                <mesh position={[label.logo.x, 0, 0]}>
+                  <planeGeometry args={[label.logo.width, label.logo.height]} />
+                  <meshBasicMaterial map={logoTexture} transparent depthWrite={false} toneMapped={false} />
+                </mesh>
+              )}
+              <Text
+                position={[label.textX, 0, 0]}
+                fontSize={label.fontSize}
+                color={CONTAINER_NUMBER_COLOR}
+                anchorX="center"
+                anchorY="middle"
+                maxWidth={label.textWidth}
+                strokeWidth={label.fontSize * NUMBER_STROKE}
+                strokeColor={CONTAINER_NUMBER_COLOR}
+                outlineWidth={label.fontSize * 0.03}
+                outlineColor="#ffffff"
+                outlineOpacity={0.4}
+                depthOffset={-2}
+              >
+                {n}
+              </Text>
+            </group>
+            {/* Numero anche sul tetto: posizione/rotazione fisse, non seguono la camera (vista dall'alto).
+               Ruotato di 90° in pianta quando il blocco e' ruotato, cosi' resta parallelo al lato
+               lungo della cassa (stesso asse gia' usato per il numero sul fianco). */}
+            <group
+              position={[label.center[0], label.center[1] + label.roof.y, label.center[2]]}
+              rotation={[-Math.PI / 2, 0, label.axis === 'x' ? Math.PI / 2 : 0]}
+            >
+              <Text
+                fontSize={label.roof.fontSize}
+                color={CONTAINER_NUMBER_COLOR}
+                anchorX="center"
+                anchorY="middle"
+                maxWidth={label.roof.maxWidth}
+                strokeWidth={label.roof.fontSize * NUMBER_STROKE}
+                strokeColor={CONTAINER_NUMBER_COLOR}
+                outlineWidth={label.roof.fontSize * 0.03}
+                outlineColor="#ffffff"
+                outlineOpacity={0.4}
+                depthOffset={-2}
+              >
+                {n}
+              </Text>
+            </group>
+          </Fragment>
         )
       })}
     </group>
