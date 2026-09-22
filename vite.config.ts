@@ -39,6 +39,10 @@ export default defineConfig(({ mode }) => {
     server: {
       port: 5173,
       host: true, // reachable from tablets on the LAN
+      // Il repo vive su /mnt/c/... (drive Windows montato in WSL): inotify non vede i salvataggi
+      // fatti dal lato Windows, quindi senza polling l'HMR resta silenzioso finche' non si riavvia
+      // il dev server a mano.
+      watch: { usePolling: true, interval: 300 },
       proxy: {
         '/api': {
           target: proxyTarget,
