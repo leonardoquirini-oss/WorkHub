@@ -48,26 +48,32 @@ export function Block3D({ block }: Block3DProps) {
     [bounds]
   )
 
+  // I numeri bay e i numeri row stanno su due lati ORTOGONALI del blocco (bay lungo v=-1.4, row
+  // lungo u=-2.2): una rotazione unica per tutti non puo' renderli leggibili entrambi. Ognuno va
+  // orientato per chi si mette su quel lato e guarda verso l'interno (bay guarda lungo +v, row
+  // lungo +u) — stessa convenzione degli stencil a terra: la testa del carattere punta dentro.
   const labels = useMemo(() => {
-    const items: { key: string; text: string; x: number; z: number; size: number }[] = []
+    const items: { key: string; text: string; x: number; z: number; size: number; rot: number }[] = []
     const pitchBay = block.bay_length + block.gap
     const pitchRow = block.row_width + block.gap
-    for (let bay = 1; bay <= block.n_bays; bay++) {
-      const u = (bay - 1) * pitchBay + block.bay_length / 2
-      const v = -1.4
-      items.push({ key: `b${bay}`, text: String(bay).padStart(2, '0'), size: 1.1, ...toWorld(block, u, v) })
-    }
+    const rotated = isRotated(block.orientation)
+    const s = isReversed(block.orientation) ? -1 : 1
+    const bayInward: [number, number] = rotated ? [s, 0] : [0, s]
+    const rowInward: [number, number] = rotated ? [0, s] : [s, 0]
+    const rotFor = ([dx, dz]: [number, number]) => Math.atan2(-dx, -dz)
+    const bayRot = rotFor(bayInward)
+    const rowRot = rotFor(rowInward)
+    // Numero di row appena dentro il blocco (non piu' fuori a sinistra), senza zero iniziale.
     for (let row = 1; row <= block.n_rows; row++) {
-      const u = -2.2
+      const u = 0.9
       const v = (row - 1) * pitchRow + block.row_width / 2
-      items.push({ key: `r${row}`, text: String(row).padStart(2, '0'), size: 1.1, ...toWorld(block, u, v) })
+      items.push({ key: `r${row}`, text: String(row), size: 1.1, rot: rowRot, ...toWorld(block, u, v) })
     }
-    items.push({ key: 'code', text: block.code, size: 2.4, ...toWorld(block, -2.2, -1.4) })
+    // Un solo codice blocco, centrato sull'intero lato bay, al posto dei numeri di bay singoli.
+    const bayCenter = ((block.n_bays - 1) * pitchBay) / 2 + block.bay_length / 2
+    items.push({ key: 'code', text: block.code, size: 2.4, rot: bayRot, ...toWorld(block, bayCenter, -1.4) })
     return items
   }, [block])
-
-  // +Pi in piu' sul giro in pianta: erano a testa in giu' viste dall'alto.
-  const textRotation: [number, number, number] = [-Math.PI / 2, 0, isRotated(block.orientation) ? Math.PI / 2 : Math.PI]
 
   return (
     <group>
@@ -82,7 +88,7 @@ export function Block3D({ block }: Block3DProps) {
         <Text
           key={l.key}
           position={[l.x, 0.05, l.z]}
-          rotation={textRotation}
+          rotation={[-Math.PI / 2, 0, l.rot]}
           fontSize={l.size}
           color={l.key === 'code' ? color : LABEL_COLOR}
           anchorX="center"
