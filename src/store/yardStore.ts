@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { workHubAPI, ApiError } from '../api/WorkHubAPI'
 import { API_CONFIG, STORAGE_KEYS } from '../api/config'
+import { useAuthStore } from './authStore'
 import { logger } from '../utils/logger'
 import { notify } from './notificationStore'
 import { baySpanOf, canPlace, cascadePreview, isPlaced, labelOf, posFromTop, restackPreview } from '../utils/slotLayout'
@@ -10,6 +11,7 @@ import type {
   Container,
   ContainerEnterRequest,
   ContainerPatchRequest,
+  ContainerProductInfo,
   Site,
   SlotRef,
   Yard,
@@ -22,6 +24,8 @@ interface YardStore {
   yards: Yard[]
   containers: Container[]
   blocks: Block[]
+  /** Materiale in giacenza per numero container (registro C/S), da mostrare sotto al numero. Vuoto per chi non ha il ruolo (dato commerciale). */
+  productByNumber: Record<string, ContainerProductInfo>
   /** Yard revision from the last snapshot / event / mutation; drives SSE delta application. */
   revision: number
   yardCode: string
@@ -81,11 +85,34 @@ export const useYardStore = create<YardStore>((set, get) => {
     await get().loadSnapshot()
   }
 
+  /**
+   * Interroga il materiale in giacenza per i numeri dati e aggiorna la cache: assente dalla
+   * risposta = nessuna riga aperta, la voce va tolta (non lasciata con un dato vecchio). Dato
+   * commerciale: niente richiesta per chi non ha il ruolo cd/logs (`WorkhubRoles.READ_PRODUCT`).
+   */
+  const refreshProducts = async (numbers: string[]) => {
+    if (numbers.length === 0 || !useAuthStore.getState().canReadProduct) return
+    try {
+      const { data } = await workHubAPI.lookupProducts(numbers)
+      set((s) => {
+        const next = { ...s.productByNumber }
+        for (const number of numbers) {
+          if (data[number]) next[number] = data[number]
+          else delete next[number]
+        }
+        return { productByNumber: next }
+      })
+    } catch (err) {
+      logger.warn('Materiale in giacenza non aggiornato', err)
+    }
+  }
+
   return {
     sites: [],
     yards: [],
     containers: [],
     blocks: [],
+    productByNumber: {},
     revision: 0,
     yardCode: '',
     selectedSiteId: null,
@@ -113,7 +140,7 @@ export const useYardStore = create<YardStore>((set, get) => {
     },
 
     selectYard: async (yardId) => {
-      set({ selectedYardId: yardId, containers: [], blocks: [], revision: 0 })
+      set({ selectedYardId: yardId, containers: [], blocks: [], productByNumber: {}, revision: 0 })
       localStorage.setItem(STORAGE_KEYS.lastYard, yardId.toString())
       await get().loadSnapshot(yardId)
     },
@@ -144,6 +171,7 @@ export const useYardStore = create<YardStore>((set, get) => {
           yards: get().yards.map((y) => (y.id_yard === id ? { ...y, ...data.yard } : y)),
           isLoadingContainers: false,
         })
+        void refreshProducts(data.containers.map((c) => c.container_number))
       } catch (err) {
         logger.error('Caricamento piazzale fallito', err)
         set({ error: errorMessage(err, 'Errore caricamento piazzale'), isLoadingContainers: false })
@@ -300,12 +328,18 @@ export const useYardStore = create<YardStore>((set, get) => {
         return
       }
       const removed = new Set(event.removed ?? [])
-      set((s) => ({
-        containers: withPosFromTop(
-          upsertAll(s.containers, event.containers ?? []).filter((c) => !removed.has(c.container_number))
-        ),
-        revision: event.revision,
-      }))
+      set((s) => {
+        const productByNumber = { ...s.productByNumber }
+        for (const number of removed) delete productByNumber[number]
+        return {
+          containers: withPosFromTop(
+            upsertAll(s.containers, event.containers ?? []).filter((c) => !removed.has(c.container_number))
+          ),
+          productByNumber,
+          revision: event.revision,
+        }
+      })
+      void refreshProducts((event.containers ?? []).map((c) => c.container_number))
     },
 
     getContainer: (containerNumber) => get().containers.find((c) => c.container_number === containerNumber),

@@ -8,6 +8,7 @@ import { notify } from '../../store/notificationStore'
 import { CONTAINER_TYPE_LABELS, CONTAINER_STATUS_LABELS, CONTAINER_STATUS_COLORS } from '../../constants/containerSizes'
 import { columnBaseHeight, columnOf, containerHeight, isPlaced, slotBox } from '../../utils/slotLayout'
 import { daysWaiting, exitReference, isMarkedForExit } from '../../utils/exitMark'
+import { isMultiGiacenza, materialLabel } from '../../utils/containerMaterial'
 import { ConfirmDialog } from './ConfirmDialog'
 import { ContainerEditForm } from './ContainerEditForm'
 import { ContainerHistory } from './ContainerHistory'
@@ -19,7 +20,7 @@ type Tab = 'info' | 'history'
 
 /** Details of the selected container: position, editable fields, history, exit. */
 export function ContainerPanel() {
-  const { selectedContainer, clearSelection } = useContainerSelection()
+  const { selectedContainer, selectedContainerMaterial, clearSelection } = useContainerSelection()
   const { containers, blocks, exitContainer } = useYardStore()
   const { showPanel, requestFlyTo, setPulse, setViewMode } = useUIStore()
   const canWrite = useAuthStore((s) => s.canWrite)
@@ -62,7 +63,18 @@ export function ContainerPanel() {
       <header className="flex items-center justify-between px-4 py-3 bg-slate-700/50 border-b border-slate-600">
         <div className="flex items-center gap-2 min-w-0">
           <Package className="w-5 h-5 text-primary-400 shrink-0" />
-          <span className="font-mono font-medium text-white truncate">{c.container_number}</span>
+          <div className="min-w-0">
+            <span className="font-mono font-medium text-white truncate block">{c.container_number}</span>
+            {materialLabel(selectedContainerMaterial) && (
+              <span
+                className={`block text-xs truncate ${
+                  isMultiGiacenza(selectedContainerMaterial) ? 'text-red-400 font-medium animate-pulse' : 'text-slate-400'
+                }`}
+              >
+                {materialLabel(selectedContainerMaterial)}
+              </span>
+            )}
+          </div>
         </div>
         <button onClick={clearSelection} className="p-1 text-slate-400 hover:text-white hover:bg-slate-600 rounded" aria-label="Chiudi">
           <X className="w-5 h-5" />

@@ -1,12 +1,12 @@
 import { useEffect, useLayoutEffect, useMemo, useRef } from 'react'
 import { useThree, type ThreeEvent } from '@react-three/fiber'
 import * as THREE from 'three'
-import { CONTAINER_DIMENSIONS, CONTAINER_STATUS_COLORS } from '../../constants/containerSizes'
-import { DEFAULT_CONTAINER_COLOR, SELECTED_CONTAINER_COLOR } from '../../constants/yardConfig'
+import { CONTAINER_DIMENSIONS } from '../../constants/containerSizes'
 import { columnBaseHeight, isPlaced, isRotated, slotBox } from '../../utils/slotLayout'
 import { RIB_BUMP_SCALE, ribTexture } from '../../utils/ribTexture'
 import { checkerTexture } from '../../utils/checkerTexture'
 import { isMarkedForExit } from '../../utils/exitMark'
+import { colorOf } from '../../utils/containerColor'
 import type { Block, Container, ContainerType, PlacedContainer } from '../../types'
 
 interface ContainersInstancedProps {
@@ -31,17 +31,6 @@ const tmpScale = new THREE.Vector3()
 const tmpColor = new THREE.Color()
 const ROT_90 = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI / 2)
 const ROT_0 = new THREE.Quaternion()
-/** Bianco: la texture a scacchi delle casse in uscita va moltiplicata per un colore neutro. */
-const MARKED_CONTAINER_COLOR = '#ffffff'
-
-function colorOf(c: Container, selected: boolean): string {
-  if (selected) return SELECTED_CONTAINER_COLOR
-  // La scacchiera di chi e' in uscita e' una `map`: moltiplica instanceColor, che quindi resta
-  // bianco (il colore di stato resta leggibile nel pannello e nella lista).
-  if (isMarkedForExit(c)) return MARKED_CONTAINER_COLOR
-  if (c.status !== 'active') return CONTAINER_STATUS_COLORS[c.status] ?? DEFAULT_CONTAINER_COLOR
-  return c.color || DEFAULT_CONTAINER_COLOR
-}
 
 interface TypeInstancesProps {
   type: ContainerType

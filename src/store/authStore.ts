@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import { login, logout, getStoredAuth, clearStoredAuth } from '../api/authApi'
 import { workHubAPI } from '../api/WorkHubAPI'
-import { canWrite, isAdmin } from '../constants/roles'
+import { canWrite, isAdmin, canReadProduct } from '../constants/roles'
 import { logger } from '../utils/logger'
 import type { User, TokenData } from '../types'
 
@@ -15,6 +15,8 @@ interface AuthStore {
   canWrite: boolean
   /** Derived from the user's roles: may manage yards and blocks. */
   isAdmin: boolean
+  /** Derived from the user's roles: may see the material in giacenza (dato commerciale). */
+  canReadProduct: boolean
 
   login: (username: string, password: string) => Promise<void>
   logout: () => Promise<void>
@@ -23,7 +25,11 @@ interface AuthStore {
 }
 
 function permissionsOf(user: User | null) {
-  return { canWrite: canWrite(user?.roles), isAdmin: isAdmin(user?.roles) }
+  return {
+    canWrite: canWrite(user?.roles),
+    isAdmin: isAdmin(user?.roles),
+    canReadProduct: canReadProduct(user?.roles),
+  }
 }
 
 /**
@@ -62,6 +68,7 @@ export const useAuthStore = create<AuthStore>((set, get) => {
     error: null,
     canWrite: false,
     isAdmin: false,
+    canReadProduct: false,
 
     login: async (username, password) => {
       set({ isLoading: true, error: null })

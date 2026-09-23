@@ -6,12 +6,14 @@ import { notify } from '../../store/notificationStore'
 import { useSlotDrag } from '../../hooks/useSlotDrag'
 import { usePlacePending } from '../../hooks/usePlacePending'
 import { getQualitySettings } from '../../utils/performance'
-import { baySpanOf, findSlotAt } from '../../utils/slotLayout'
+import { baySpanOf, columnOf, findSlotAt, isPlaced } from '../../utils/slotLayout'
+import type { Container } from '../../types'
 import { Grid3D } from './Grid3D'
 import { YardAreas3D } from './YardAreas3D'
 import { Controls } from './Controls'
 import { Block3D } from './Block3D'
 import { ContainersInstanced } from './ContainersInstanced'
+import { GhostContainers } from './GhostContainers'
 import { SlotHighlight } from './SlotHighlight'
 import { ContainerLabels } from './ContainerLabels'
 import { PulseMarker } from './PulseMarker'
@@ -19,7 +21,7 @@ import { PulseMarker } from './PulseMarker'
 const CLICK_SLOP_PX = 6
 
 function Scene({ highQuality }: { highQuality: boolean }) {
-  const { yards, selectedYardId, containers, blocks } = useYardStore()
+  const { yards, selectedYardId, containers, blocks, productByNumber } = useYardStore()
   const { showGrid, showAreas, selectContainer, selectedContainerNumber, dragTarget, pulseNumber } = useUIStore()
   const { dragging, onContainerPointerDown, onContainerContextMenu, onPointerMove, onPointerUp } = useSlotDrag()
   const { pendingEnter, placeAt } = usePlacePending()
@@ -29,6 +31,33 @@ function Scene({ highQuality }: { highQuality: boolean }) {
     () => (pulseNumber ? containers.find((c) => c.container_number === pulseNumber) ?? null : null),
     [containers, pulseNumber]
   )
+
+  // Selezionata una cassa in pila, la sua colonna resta piena (leggibile) e il resto del suo
+  // STESSO blocco diventa un contorno tratteggiato trasparente: si legge la pila scelta ma si vede
+  // ancora quanto spazio c'e' sulle altre colonne di quel blocco, utile per trascinarne una li'.
+  // Gli altri blocchi non sono toccati. Il click sul terreno (o fuori) deseleziona e riporta tutto pieno.
+  const { solidContainers, ghostContainers } = useMemo(() => {
+    const selected = selectedContainerNumber
+      ? containers.find((c) => c.container_number === selectedContainerNumber)
+      : undefined
+    if (selected && isPlaced(selected)) {
+      const column = columnOf(containers, selected.id_block, selected.row_no, selected.bay)
+      const columnNumbers = new Set(column.map((c) => c.container_number))
+      const solid: Container[] = []
+      const ghost: Container[] = []
+      for (const c of containers) {
+        if (columnNumbers.has(c.container_number)) {
+          solid.push(c)
+        } else if (isPlaced(c) && c.id_block === selected.id_block) {
+          ghost.push(c)
+        } else {
+          solid.push(c)
+        }
+      }
+      return { solidContainers: solid, ghostContainers: ghost }
+    }
+    return { solidContainers: containers, ghostContainers: [] as Container[] }
+  }, [containers, selectedContainerNumber])
 
   /**
    * Click on a container. R3F also delivers the click to the ground plane behind it (it was
@@ -102,7 +131,7 @@ function Scene({ highQuality }: { highQuality: boolean }) {
       ))}
 
       <ContainersInstanced
-        containers={containers}
+        containers={solidContainers}
         blocks={blocks}
         selectedNumber={selectedContainerNumber}
         hiddenNumber={dragging?.container_number ?? null}
@@ -112,7 +141,15 @@ function Scene({ highQuality }: { highQuality: boolean }) {
         onContextMenu={onContainerContextMenu}
       />
 
-      <ContainerLabels containers={containers} blocks={blocks} selectedNumber={selectedContainerNumber} pulseNumber={pulseNumber} />
+      {ghostContainers.length > 0 && <GhostContainers containers={ghostContainers} blocks={blocks} />}
+
+      <ContainerLabels
+        containers={solidContainers}
+        blocks={blocks}
+        selectedNumber={selectedContainerNumber}
+        pulseNumber={pulseNumber}
+        productByNumber={productByNumber}
+      />
 
       {pulseContainer && <PulseMarker container={pulseContainer} blocks={blocks} containers={containers} />}
 

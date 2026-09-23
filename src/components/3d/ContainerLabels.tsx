@@ -7,20 +7,27 @@ import { CONTAINER_DIMENSIONS } from '../../constants/containerSizes'
 import { CONTAINER_NUMBER_COLOR } from '../../constants/yardConfig'
 import { columnBaseHeight, isPlaced, isRotated, slotBox } from '../../utils/slotLayout'
 import { isMarkedForExit } from '../../utils/exitMark'
+import { isMultiGiacenza, materialLabel } from '../../utils/containerMaterial'
 import { logger } from '../../utils/logger'
-import type { Block, Container, PlacedContainer } from '../../types'
+import type { Block, Container, ContainerProductInfo, PlacedContainer } from '../../types'
 
 interface ContainerLabelsProps {
   containers: Container[]
   blocks: Block[]
   selectedNumber: string | null
   pulseNumber: string | null
+  /** Materiale in giacenza per numero container: scritto in basso sul fianco, per ogni cassa etichettata. */
+  productByNumber: Record<string, ContainerProductInfo>
   /** How many of the containers nearest to the camera get a label besides the selected one. */
   maxLabels?: number
 }
 
 /** Gap (m) between the container face and the text, to avoid z-fighting. */
 const FACE_OFFSET = 0.05
+/** Font del materiale rispetto a quello del numero: leggermente piu' piccolo, stessa riga in basso sulla cassa. */
+const MATERIAL_FONT_RATIO = 0.75
+/** Margine (in font-size del materiale) dal bordo inferiore della cassa, cosi' il testo non tocca il pianale. */
+const MATERIAL_BOTTOM_MARGIN = 0.75
 /** Fraction of the long side logo + number may use. */
 const TEXT_FILL = 0.88
 /**
@@ -62,6 +69,8 @@ interface FaceLabel {
   logo: { x: number; width: number; height: number } | null
   /** Targhetta bianca dietro logo e numero, solo per le casse marcate per l'uscita. */
   plate: { width: number; height: number } | null
+  /** Riga in basso sulla cassa col materiale in giacenza: font leggermente piu' piccolo del numero, indipendente dalla sua posizione. */
+  material: { y: number; width: number; fontSize: number }
   /** Numero anche sul tetto, per la vista dall'alto: posizione locale (sopra il centro) e misura. */
   roof: { y: number; fontSize: number; maxWidth: number }
 }
@@ -115,14 +124,15 @@ function labelOf(c: PlacedContainer, block: Block, all: Container[]): FaceLabel 
     ? Math.min(dims.height * LOGO_FACE_RATIO * BRAND_LOGO_ASPECT, width * LOGO_MAX_SHARE)
     : 0
   const logoHeight = logoWidth / BRAND_LOGO_ASPECT
-  const gap = logoWidth * LOGO_GAP_SHARE
+  const logoGap = logoWidth * LOGO_GAP_SHARE
   // The number fills the width the logo leaves, up to a share of the container height.
   const chars = Math.max(c.container_number.length, 8)
-  const available = width - logoWidth - gap
+  const available = width - logoWidth - logoGap
   const fontSize = Math.min(Math.max(available / (chars * CHAR_ADVANCE), 0.3), dims.height * NUMBER_MAX_RATIO)
   // Sul tetto lo spazio e' vincolato dalla larghezza della cassa (across), non dall'altezza:
   // stessa formula per-carattere, cap sulla larghezza invece che sull'altezza.
   const roofFontSize = Math.min(Math.max((along * TEXT_FILL) / (chars * CHAR_ADVANCE), 0.3), across * NUMBER_MAX_RATIO * 2)
+  const materialFontSize = fontSize * MATERIAL_FONT_RATIO
   return {
     number: c.container_number,
     center: box.center,
@@ -132,12 +142,66 @@ function labelOf(c: PlacedContainer, block: Block, all: Container[]): FaceLabel 
     roof: { y: dims.height / 2 + FACE_OFFSET, fontSize: roofFontSize, maxWidth: along * TEXT_FILL },
     // [ logo ][ gap ][ number ]: the logo eats the left end, the number is centred in the rest
     textWidth: available,
-    textX: (logoWidth + gap) / 2,
+    textX: (logoWidth + logoGap) / 2,
     logo: branded ? { x: -width / 2 + logoWidth / 2, width: logoWidth, height: logoHeight } : null,
     plate: isMarkedForExit(c)
       ? { width, height: Math.max(logoHeight, fontSize * 1.6) * PLATE_PADDING }
       : null,
+    // In basso sul fianco, non sotto al numero: il numero resta dov'era.
+    material: { y: -dims.height / 2 + materialFontSize * MATERIAL_BOTTOM_MARGIN, width, fontSize: materialFontSize },
   }
+}
+
+/**
+ * Materiale in giacenza, in basso sul fianco della cassa. In rosso lampeggiante quando il
+ * registro ha piu' righe aperte per la stessa cassa ("Multi-Giacenza"): l'oscillazione e' un
+ * `setInterval` invece di un `useFrame`, perche' con `frameloop="demand"` un render continuo per
+ * un solo testo lampeggiante e' spreco — qui basta invalidare a ogni cambio di stato.
+ */
+function MaterialSubLabel({
+  text,
+  multi,
+  y,
+  width,
+  fontSize,
+}: {
+  text: string
+  multi: boolean
+  y: number
+  width: number
+  fontSize: number
+}) {
+  const [on, setOn] = useState(true)
+  const invalidate = useThree((s) => s.invalidate)
+
+  useEffect(() => {
+    if (!multi) return
+    const id = setInterval(() => {
+      setOn((v) => !v)
+      invalidate()
+    }, 450)
+    return () => clearInterval(id)
+  }, [multi, invalidate])
+
+  return (
+    <Text
+      position={[0, y, 0]}
+      fontSize={fontSize}
+      color={multi ? '#ef4444' : CONTAINER_NUMBER_COLOR}
+      fillOpacity={multi ? (on ? 1 : 0.25) : 1}
+      anchorX="center"
+      anchorY="middle"
+      maxWidth={width}
+      strokeWidth={fontSize * NUMBER_STROKE}
+      strokeColor={multi ? '#ef4444' : CONTAINER_NUMBER_COLOR}
+      outlineWidth={fontSize * 0.03}
+      outlineColor="#ffffff"
+      outlineOpacity={0.4}
+      depthOffset={-2}
+    >
+      {text}
+    </Text>
+  )
 }
 
 /**
@@ -147,7 +211,14 @@ function labelOf(c: PlacedContainer, block: Block, all: Container[]): FaceLabel 
  * so the number stays readable while orbiting. Only the containers nearest to the camera are
  * labelled, plus the selected and the searched one.
  */
-export function ContainerLabels({ containers, blocks, selectedNumber, pulseNumber, maxLabels = 48 }: ContainerLabelsProps) {
+export function ContainerLabels({
+  containers,
+  blocks,
+  selectedNumber,
+  pulseNumber,
+  productByNumber,
+  maxLabels = 48,
+}: ContainerLabelsProps) {
   const [nearest, setNearest] = useState<string[]>([])
   const lastCheck = useRef(0)
   const groups = useRef(new Map<string, THREE.Group>())
@@ -207,6 +278,7 @@ export function ContainerLabels({ containers, blocks, selectedNumber, pulseNumbe
     <group>
       {visible.map((n) => {
         const label = byNumber.get(n)!
+        const materialText = materialLabel(productByNumber[n])
         return (
           <Fragment key={n}>
             <group
@@ -244,6 +316,15 @@ export function ContainerLabels({ containers, blocks, selectedNumber, pulseNumbe
               >
                 {n}
               </Text>
+              {materialText && (
+                <MaterialSubLabel
+                  text={materialText}
+                  multi={isMultiGiacenza(productByNumber[n])}
+                  fontSize={label.material.fontSize}
+                  y={label.material.y}
+                  width={label.material.width}
+                />
+              )}
             </group>
             {/* Numero anche sul tetto: posizione/rotazione fisse, non seguono la camera (vista dall'alto).
                Ruotato di 90° in pianta quando il blocco e' ruotato, cosi' resta parallelo al lato

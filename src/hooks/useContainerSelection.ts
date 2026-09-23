@@ -5,11 +5,13 @@ import type { Container } from '../types'
 
 export function useContainerSelection() {
   const { selectedContainerNumber, selectContainer } = useUIStore()
-  const { containers, getContainer } = useYardStore()
+  const { containers, productByNumber, getContainer } = useYardStore()
 
   const selectedContainer: Container | undefined = selectedContainerNumber
     ? getContainer(selectedContainerNumber)
     : undefined
+
+  const selectedContainerMaterial = selectedContainerNumber ? (productByNumber[selectedContainerNumber] ?? null) : null
 
   const handleSelect = useCallback(
     (containerNumber: string | null) => {
@@ -36,6 +38,7 @@ export function useContainerSelection() {
   return {
     selectedContainer,
     selectedContainerNumber,
+    selectedContainerMaterial,
     containers,
     handleSelect,
     handleToggleSelect,

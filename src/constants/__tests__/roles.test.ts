@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { canWrite, isAdmin, hasAnyRole } from '../roles'
+import { canWrite, isAdmin, canReadProduct, hasAnyRole } from '../roles'
 
 describe('roles', () => {
   it('grants write to cd, logs and resources only', () => {
@@ -15,6 +15,13 @@ describe('roles', () => {
   it('grants admin to cd only', () => {
     expect(isAdmin(['cd', 'logs'])).toBe(true)
     expect(isAdmin(['logs', 'resources'])).toBe(false)
+  })
+
+  it('grants product visibility to cd and logs only, not resources', () => {
+    expect(canReadProduct(['cd'])).toBe(true)
+    expect(canReadProduct(['logs'])).toBe(true)
+    expect(canReadProduct(['resources'])).toBe(false)
+    expect(canReadProduct(undefined)).toBe(false)
   })
 
   it('hasAnyRole matches any intersection', () => {

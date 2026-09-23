@@ -8,6 +8,7 @@ import type {
   ContainerExitRequest,
   ContainerMoveRequest,
   ContainerPatchRequest,
+  ContainerProductInfo,
   ContainerRestackRequest,
   ExitResponse,
   MoveResponse,
@@ -216,6 +217,14 @@ class WorkHubAPI {
   /** Where the given containers are, across all yards. Missing keys = not in any yard. */
   async lookupPositions(containerNumbers: string[]): Promise<ApiResponse<Record<string, PositionInfo>>> {
     return this.fetch('/workhub/containers/lookup-positions', this.json('POST', containerNumbers))
+  }
+
+  /**
+   * Materiale in giacenza per N container (registro carico/scarico), dall'ultima riga senza data
+   * di uscita. Missing keys = nessuna riga aperta (cassa vuota). Ruoli `cd`/`logs` (dato commerciale).
+   */
+  async lookupProducts(containerNumbers: string[]): Promise<ApiResponse<Record<string, ContainerProductInfo>>> {
+    return this.fetch('/workhub/containers/lookup-products', this.json('POST', containerNumbers))
   }
 
   // === SEARCH ===

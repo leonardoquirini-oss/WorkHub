@@ -155,3 +155,15 @@ export interface UnitSearchResult {
   targa: string | null
   unitType: 'c' | 't' // container or trailer
 }
+
+/**
+ * Materiale in giacenza per una cassa, dall'ultima riga del registro carico/scarico senza data di
+ * uscita. `open_count >= 2` segnala piu' righe aperte per la stessa cassa (anomalia di registro).
+ */
+export interface ContainerProductInfo {
+  product: string | null
+  id_material_type: number | null
+  open_count: number
+  id_site: number
+  loading_date: string | null
+}

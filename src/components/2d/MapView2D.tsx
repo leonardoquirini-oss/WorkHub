@@ -80,7 +80,7 @@ function numberPlateOf(
 /** Top-down SVG map of the yard: blocks, bays × rows, top container and stack height per column. */
 export function MapView2D() {
   const { yards, selectedYardId, containers, blocks } = useYardStore()
-  const { selectedContainerNumber, toggleSelect, showAreas, pulseNumber, openContextMenu } = useUIStore()
+  const { selectedContainerNumber, selectContainer, toggleSelect, showAreas, pulseNumber, openContextMenu } = useUIStore()
   const { pendingEnter, placeAt } = usePlacePending()
   const yard = yards.find((y) => y.id_yard === selectedYardId)
 
@@ -93,7 +93,8 @@ export function MapView2D() {
     return <div className="w-full h-full flex items-center justify-center text-slate-400">Seleziona un piazzale</div>
   }
 
-  const onCellClick = (cell: Cell) => {
+  const onCellClick = (cell: Cell, e: ReactMouseEvent) => {
+    e.stopPropagation()
     if (pendingEnter) {
       const slot = { id_block: cell.block.id_block, bay: cell.bay, row_no: cell.row }
       const check = canPlace(pendingEnter, slot, blocks, containers)
@@ -115,7 +116,12 @@ export function MapView2D() {
 
   return (
     <div className="w-full h-full bg-slate-900 p-2 sm:p-4 overflow-hidden">
-      <svg viewBox={`-2 -2 ${yard.width + 4} ${yard.length + 4}`} className="w-full h-full" preserveAspectRatio="xMidYMid meet">
+      <svg
+        viewBox={`-2 -2 ${yard.width + 4} ${yard.length + 4}`}
+        className="w-full h-full"
+        preserveAspectRatio="xMidYMid meet"
+        onClick={() => selectContainer(null)}
+      >
         <defs>
           {/* Scacchi in metri di piazzale (userSpaceOnUse): stessa taglia dei quadri in 3D. */}
           <pattern
@@ -164,7 +170,7 @@ export function MapView2D() {
           return (
             <g
               key={cell.key}
-              onClick={() => onCellClick(cell)}
+              onClick={(e) => onCellClick(cell, e)}
               onContextMenu={(e) => onCellContextMenu(cell, e)}
               className={cell.top || placeable ? 'cursor-pointer' : ''}
             >
