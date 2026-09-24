@@ -6,13 +6,14 @@ services:
       context: .
       dockerfile: Dockerfile
       args:
-        # Build-time fallbacks. The same variables, when set in `environment`, are written
-        # to /config.js at container start and take precedence (no rebuild needed).
-        VITE_KEYCLOAK_URL: ${VITE_KEYCLOAK_URL:-http://localhost:8080}
-        VITE_KEYCLOAK_REALM: ${VITE_KEYCLOAK_REALM:-gb-realm}
-        VITE_KEYCLOAK_CLIENT_ID: ${VITE_KEYCLOAK_CLIENT_ID:-berlink-client}
-        VITE_API_URL: ${VITE_API_URL:-/api}
-        VITE_DEFAULT_SITE_ID: ${VITE_DEFAULT_SITE_ID:-1}
+        # Obbligatorie al build (lette da .env, vedi .env.example): il Dockerfile fallisce
+        # se mancano. A runtime le stesse variabili, se valorizzate in `environment`, sono
+        # scritte in /config.js e hanno precedenza (nessun rebuild necessario).
+        VITE_KEYCLOAK_URL: ${VITE_KEYCLOAK_URL}
+        VITE_KEYCLOAK_REALM: ${VITE_KEYCLOAK_REALM}
+        VITE_KEYCLOAK_CLIENT_ID: ${VITE_KEYCLOAK_CLIENT_ID}
+        VITE_API_URL: ${VITE_API_URL}
+        VITE_DEFAULT_SITE_ID: ${VITE_DEFAULT_SITE_ID}
     image: workhub:latest
     container_name: workhub
     restart: unless-stopped
@@ -47,3 +48,4 @@ services:
 networks:
   berlink-network:
     external: true
+    name: berlink-dev_berlink-network

@@ -1,0 +1,38 @@
+version: '3'
+
+vars:
+  
+
+tasks:
+    
+  stop-wu:
+    cmds:
+      - docker-compose  -f docker-compose.yml stop workhub
+    silent: true  
+  
+  build-wu:
+    cmds:
+      - docker-compose  -f docker-compose.yml build workhub
+    silent: true  
+    
+  fe:
+    cmds:
+      - task stop-wu
+      - task build-wu
+    silent: true  
+
+  logs-wu:
+    cmds:
+      - docker-compose logs -f workhub
+      
+  up:
+    cmds:
+      - docker-compose -f docker-compose.yml up -d
+    silent: true 
+
+  restart:
+    cmds:
+      - docker-compose down && docker-compose -f docker-compose.yml up -d
+    silent: true    
+    
+  

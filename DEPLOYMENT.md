@@ -23,16 +23,13 @@ npm run build             # tsc + vite build → dist/
 
 ### Produzione
 
+Richiede `.env` compilato (`cp .env.example .env`): i build args sono obbligatori, la build
+fallisce se mancano.
+
 ```bash
 docker compose build
 docker compose up -d
 docker compose logs -f workhub
-```
-
-### Sviluppo (hot reload)
-
-```bash
-docker compose -f docker-compose.dev.yml up -d
 ```
 
 ## Configurazione
@@ -40,8 +37,8 @@ docker compose -f docker-compose.dev.yml up -d
 La configurazione ha tre livelli, dal piu' prioritario al meno:
 
 1. **Runtime** — `docker-entrypoint.sh` scrive `/config.js` (`window.__WORKHUB_CONFIG__`) ad ogni avvio del container leggendo le variabili d'ambiente sotto. Permette di cambiare Keycloak/API **senza rebuild** dell'immagine.
-2. **Build-time** — le stesse variabili passate come build args (`docker-compose.yml` → `build.args`) vengono compilate nel bundle come fallback.
-3. **Default** — in `src/api/config.ts` (`http://localhost:8080`, `gb-realm`, `berlink-client`, `/api`, sito `1`).
+2. **Build-time** — le stesse variabili passate come build args (`docker-compose.yml` → `build.args`, letti da `.env`) vengono compilate nel bundle come fallback e sono **obbligatorie**: la build fallisce se mancano (vedi `.env.example`).
+3. **Default** — in `src/api/config.ts` (`http://localhost:8080`, `gb-realm`, `berlink-client`, `/api`, sito `1`), usati solo da `npm run dev` senza `.env`.
 
 Una variabile vuota a runtime significa "usa il valore di build".
 
@@ -116,13 +113,13 @@ curl http://localhost:5173/config.js   # window.__WORKHUB_CONFIG__ = {...}
 ```
 WorkHub/
 ├── Dockerfile             # Multi-stage (node:22-alpine → nginx:alpine)
-├── Dockerfile.dev         # Dev con hot reload
 ├── docker-compose.yml     # Produzione
-├── docker-compose.dev.yml # Sviluppo
 ├── nginx.conf             # Proxy /api, SSE, SPA fallback
 ├── docker-entrypoint.sh   # envsubst BACKEND_URL + generazione /config.js
 └── .dockerignore
 ```
+
+Sviluppo locale: `npm run dev` diretto (nessun container hot-reload), come nel frontend BERLink.
 
 ## Troubleshooting
 

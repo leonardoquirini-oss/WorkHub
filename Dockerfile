@@ -12,13 +12,22 @@ RUN npm ci --silent
 # Copy source code
 COPY . .
 
-# Build-time defaults (fallbacks only: docker-entrypoint.sh can override them at runtime
-# through /config.js, so no environment-specific host belongs here).
-ARG VITE_KEYCLOAK_URL=http://localhost:8080
-ARG VITE_KEYCLOAK_REALM=gb-realm
-ARG VITE_KEYCLOAK_CLIENT_ID=berlink-client
-ARG VITE_API_URL=/api
-ARG VITE_DEFAULT_SITE_ID=1
+# Riceve le variabili come build arguments da docker-compose (letti da .env, vedi .env.example)
+# Da settare obbligatoriamente al momento del build: docker-entrypoint.sh puo' comunque
+# sovrascriverle a runtime senza rebuild tramite /config.js, quindi qui non c'e' un host
+# hardcoded, solo l'obbligo di passare un valore esplicito.
+ARG VITE_KEYCLOAK_URL
+ARG VITE_KEYCLOAK_REALM
+ARG VITE_KEYCLOAK_CLIENT_ID
+ARG VITE_API_URL
+ARG VITE_DEFAULT_SITE_ID
+
+# Controllo e interrompo la build se non sono definite le variabili
+RUN test -n "$VITE_KEYCLOAK_URL" || (echo "ERRORE: devi passare --build-arg VITE_KEYCLOAK_URL=<valore>" && exit 1)
+RUN test -n "$VITE_KEYCLOAK_REALM" || (echo "ERRORE: devi passare --build-arg VITE_KEYCLOAK_REALM=<valore>" && exit 1)
+RUN test -n "$VITE_KEYCLOAK_CLIENT_ID" || (echo "ERRORE: devi passare --build-arg VITE_KEYCLOAK_CLIENT_ID=<valore>" && exit 1)
+RUN test -n "$VITE_API_URL" || (echo "ERRORE: devi passare --build-arg VITE_API_URL=<valore>" && exit 1)
+RUN test -n "$VITE_DEFAULT_SITE_ID" || (echo "ERRORE: devi passare --build-arg VITE_DEFAULT_SITE_ID=<valore>" && exit 1)
 
 ENV VITE_KEYCLOAK_URL=$VITE_KEYCLOAK_URL
 ENV VITE_KEYCLOAK_REALM=$VITE_KEYCLOAK_REALM
