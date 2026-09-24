@@ -7,6 +7,8 @@ interface UIPreferences {
   showGrid: boolean
   showAreas: boolean
   showStats: boolean
+  showHeader: boolean
+  showToolbar: boolean
   viewMode: ViewMode
   toolbarPos: ToolbarPos | null
 }
@@ -54,6 +56,8 @@ interface UIStore {
   showAreas: boolean
   showStats: boolean
   showPanel: boolean
+  showHeader: boolean
+  showToolbar: boolean
   viewMode: ViewMode
 
   selectedContainerNumber: string | null
@@ -76,6 +80,8 @@ interface UIStore {
   toggleAreas: () => void
   toggleStats: () => void
   togglePanel: () => void
+  toggleHeader: () => void
+  toggleToolbar: () => void
   setViewMode: (mode: ViewMode) => void
   setToolbarPos: (pos: ToolbarPos | null) => void
   selectContainer: (containerNumber: string | null) => void
@@ -125,8 +131,8 @@ function sameTarget(a: DragTarget | null, b: DragTarget | null): boolean {
 
 export const useUIStore = create<UIStore>((set, get) => {
   const persist = () => {
-    const { showGrid, showAreas, showStats, viewMode, toolbarPos } = get()
-    savePreferences({ showGrid, showAreas, showStats, viewMode, toolbarPos })
+    const { showGrid, showAreas, showStats, showHeader, showToolbar, viewMode, toolbarPos } = get()
+    savePreferences({ showGrid, showAreas, showStats, showHeader, showToolbar, viewMode, toolbarPos })
   }
 
   return {
@@ -134,6 +140,8 @@ export const useUIStore = create<UIStore>((set, get) => {
     showAreas: true,
     showStats: true,
     showPanel: true,
+    showHeader: true,
+    showToolbar: true,
     viewMode: '3d',
     toolbarPos: null,
     selectedContainerNumber: null,
@@ -159,6 +167,14 @@ export const useUIStore = create<UIStore>((set, get) => {
       persist()
     },
     togglePanel: () => set((s) => ({ showPanel: !s.showPanel })),
+    toggleHeader: () => {
+      set((s) => ({ showHeader: !s.showHeader }))
+      persist()
+    },
+    toggleToolbar: () => {
+      set((s) => ({ showToolbar: !s.showToolbar }))
+      persist()
+    },
     setViewMode: (viewMode) => {
       set({ viewMode })
       persist()
@@ -199,6 +215,8 @@ export const useUIStore = create<UIStore>((set, get) => {
         showGrid: prefs.showGrid ?? true,
         showAreas: prefs.showAreas ?? true,
         showStats: prefs.showStats ?? true,
+        showHeader: prefs.showHeader ?? true,
+        showToolbar: prefs.showToolbar ?? true,
         viewMode: prefs.viewMode ?? '3d',
         toolbarPos: prefs.toolbarPos ?? null,
       })
