@@ -12,7 +12,14 @@ export default defineConfig(({ mode }) => {
       react(),
       VitePWA({
         registerType: 'autoUpdate',
-        includeAssets: ['icon.svg'],
+        includeAssets: [
+          'favicon.ico',
+          'favicon.svg',
+          'favicon-16.png',
+          'favicon-32.png',
+          'favicon-48.png',
+          'favicon-180.png',
+        ],
         manifest: {
           name: 'WorkHub - Gestione Piazzale',
           short_name: 'WorkHub',
@@ -23,7 +30,10 @@ export default defineConfig(({ mode }) => {
           display: 'standalone',
           orientation: 'landscape',
           start_url: '/',
-          icons: [{ src: 'icon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any' }],
+          icons: [
+            { src: 'favicon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any' },
+            { src: 'favicon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
+          ],
         },
         workbox: {
           // App shell only: never cache API calls or the runtime config
